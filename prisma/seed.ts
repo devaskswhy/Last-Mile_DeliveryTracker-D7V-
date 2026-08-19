@@ -5,16 +5,28 @@ import { hash } from "bcryptjs";
  * Idempotent seed: safe to re-run. Everything is upserted on a natural key, so
  * a second run updates in place instead of duplicating.
  *
- * Passwords come from env when present, so a non-local environment can seed
- * without the defaults below ever being valid credentials.
+ * Seed passwords are read from the environment with no fallback. Hardcoding a
+ * default would put a working credential in a public repository, and the
+ * upserts below rewrite passwordHash on every run, so rotating a seeded
+ * account is just: change the variable, re-run the seed.
  */
 const prisma = new PrismaClient();
 
 const SALT_ROUNDS = 12;
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `${name} is not set. Add it to .env (see .env.example) before seeding.`,
+    );
+  }
+  return value;
+}
+
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@lastmile.local";
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "Admin@12345";
-const AGENT_PASSWORD = process.env.SEED_AGENT_PASSWORD ?? "Agent@12345";
+const ADMIN_PASSWORD = requireEnv("SEED_ADMIN_PASSWORD");
+const AGENT_PASSWORD = requireEnv("SEED_AGENT_PASSWORD");
 
 async function main() {
   console.log("Seeding database...");
@@ -118,7 +130,11 @@ async function main() {
   // --- Admin ---------------------------------------------------------------
   const admin = await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
-    update: { role: "ADMIN", isActive: true },
+    update: {
+      role: "ADMIN",
+      isActive: true,
+      passwordHash: await hash(ADMIN_PASSWORD, SALT_ROUNDS),
+    },
     create: {
       email: ADMIN_EMAIL,
       name: "Platform Admin",
@@ -148,7 +164,11 @@ async function main() {
   for (const seed of agentSeeds) {
     const user = await prisma.user.upsert({
       where: { email: seed.email },
-      update: { role: "AGENT", isActive: true },
+      update: {
+        role: "AGENT",
+        isActive: true,
+        passwordHash: await hash(AGENT_PASSWORD, SALT_ROUNDS),
+      },
       create: {
         email: seed.email,
         name: seed.name,

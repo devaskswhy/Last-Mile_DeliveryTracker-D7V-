@@ -143,14 +143,16 @@ npm run db:seed      # Idempotent seed
 npm run db:studio    # Prisma Studio
 ```
 
-Seeded accounts (local defaults — override with `SEED_ADMIN_PASSWORD` /
-`SEED_AGENT_PASSWORD`):
+Seeded accounts. Passwords are **never** written down here — the seed reads
+`SEED_ADMIN_PASSWORD` and `SEED_AGENT_PASSWORD` from `.env` and fails loudly if
+they are unset. Re-running the seed rewrites the stored hashes, so rotating a
+seeded account means changing the variable and running `npm run db:seed` again.
 
-| Role  | Email                        | Password      |
-| ----- | ---------------------------- | ------------- |
-| ADMIN | `admin@lastmile.local`       | `Admin@12345` |
-| AGENT | `agent.north@lastmile.local` | `Agent@12345` |
-| AGENT | `agent.south@lastmile.local` | `Agent@12345` |
+| Role  | Email                        | Password source       |
+| ----- | ---------------------------- | --------------------- |
+| ADMIN | `admin@lastmile.local`       | `SEED_ADMIN_PASSWORD` |
+| AGENT | `agent.north@lastmile.local` | `SEED_AGENT_PASSWORD` |
+| AGENT | `agent.south@lastmile.local` | `SEED_AGENT_PASSWORD` |
 
 ---
 
