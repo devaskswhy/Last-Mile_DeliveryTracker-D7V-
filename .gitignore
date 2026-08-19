@@ -1,0 +1,17 @@
+# dependencies
+node_modules
+
+# env files (never commit real secrets)
+.env*
+!.env.example
+
+# build output
+.next/
+dist/
+out/
+*.tsbuildinfo
+
+# editors
+.vscode/
+.idea/
+

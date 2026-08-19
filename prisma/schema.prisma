@@ -1,0 +1,318 @@
+// Last-Mile Delivery Tracker — data model
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection used by the app at runtime.
+  url       = env("DATABASE_URL")
+  // Direct (unpooled) connection used by Prisma Migrate.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  CUSTOMER
+  AGENT
+  ADMIN
+}
+
+enum OrderType {
+  B2B
+  B2C
+}
+
+/// INTRA = pickup and drop fall in the same zone; INTER = different zones.
+enum RateScope {
+  INTRA
+  INTER
+}
+
+enum PaymentType {
+  PREPAID
+  COD
+}
+
+enum SurchargeMode {
+  FIXED
+  PERCENTAGE
+}
+
+enum AgentAvailability {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
+enum OrderStatus {
+  CREATED
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role     @default(CUSTOMER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  agentProfile  Agent?
+  orders        Order[]              @relation("CustomerOrders")
+  statusActions OrderStatusHistory[] @relation("StatusActor")
+
+  @@index([role])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Geography
+// ---------------------------------------------------------------------------
+
+model Zone {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  areas         Area[]
+  agents        Agent[]
+  rateCardsFrom RateCard[] @relation("RateCardFromZone")
+  rateCardsTo   RateCard[] @relation("RateCardToZone")
+  pickupOrders  Order[]    @relation("PickupZone")
+  dropOrders    Order[]    @relation("DropZone")
+
+  @@map("zones")
+}
+
+model Area {
+  id       String  @id @default(cuid())
+  name     String
+  pincode  String
+  zoneId   String
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone Zone @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+
+  @@unique([zoneId, name])
+  @@index([pincode])
+  @@index([zoneId])
+  @@map("areas")
+}
+
+// ---------------------------------------------------------------------------
+// Pricing
+// ---------------------------------------------------------------------------
+
+/// One row per (orderType, scope, fromZone, toZone) pricing rule.
+/// For INTRA rows, fromZoneId equals toZoneId.
+model RateCard {
+  id         String    @id @default(cuid())
+  orderType  OrderType
+  scope      RateScope
+  fromZoneId String
+  toZoneId   String
+
+  /// Flat charge covering the first baseWeightKg of chargeable weight.
+  baseRate     Decimal @db.Decimal(10, 2)
+  baseWeightKg Decimal @default(1) @db.Decimal(10, 3)
+
+  /// Charge per kg (or part thereof) of chargeable weight beyond baseWeightKg.
+  perKgRate Decimal @db.Decimal(10, 2)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fromZone Zone @relation("RateCardFromZone", fields: [fromZoneId], references: [id], onDelete: Restrict)
+  toZone   Zone @relation("RateCardToZone", fields: [toZoneId], references: [id], onDelete: Restrict)
+
+  @@unique([orderType, scope, fromZoneId, toZoneId])
+  @@index([orderType, scope])
+  @@map("rate_cards")
+}
+
+/// Extra charge applied when paymentType = COD, resolved per orderType.
+model CodSurchargeConfig {
+  id        String        @id @default(cuid())
+  orderType OrderType     @unique
+  mode      SurchargeMode
+
+  /// Used when mode = FIXED — a flat currency amount.
+  amount Decimal? @db.Decimal(10, 2)
+
+  /// Used when mode = PERCENTAGE — percent of freight charge, e.g. 2.50 means 2.5%.
+  percentage Decimal? @db.Decimal(5, 2)
+
+  /// Floor applied to a PERCENTAGE result, if set.
+  minAmount Decimal? @db.Decimal(10, 2)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("cod_surcharge_configs")
+}
+
+// ---------------------------------------------------------------------------
+// Delivery agents
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  employeeCode   String            @unique
+  currentZoneId  String?
+  currentLat     Float?
+  currentLng     Float?
+  availability   AgentAvailability @default(OFFLINE)
+  lastLocationAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentZone Zone?   @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)
+  orders      Order[] @relation("AssignedAgent")
+
+  @@index([availability, currentZoneId])
+  @@map("agents")
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+model Order {
+  id          String @id @default(cuid())
+  orderNumber String @unique
+
+  customerId String
+
+  // --- Pickup ---
+  pickupContactName  String
+  pickupPhone        String
+  pickupAddressLine1 String
+  pickupAddressLine2 String?
+  pickupCity         String
+  pickupPincode      String
+  pickupZoneId       String
+
+  // --- Drop ---
+  dropContactName  String
+  dropPhone        String
+  dropAddressLine1 String
+  dropAddressLine2 String?
+  dropCity         String
+  dropPincode      String
+  dropZoneId       String
+
+  // --- Parcel dimensions (cm) and weights (kg) ---
+  lengthCm  Decimal @db.Decimal(10, 2)
+  breadthCm Decimal @db.Decimal(10, 2)
+  heightCm  Decimal @db.Decimal(10, 2)
+
+  /// Scale weight as measured.
+  actualWeightKg Decimal @db.Decimal(10, 3)
+
+  /// (L x B x H) / volumetricDivisor — persisted so historical orders keep their maths.
+  volumetricWeightKg Decimal @db.Decimal(10, 3)
+  volumetricDivisor  Int     @default(5000)
+
+  /// The greater of actualWeightKg and volumetricWeightKg.
+  chargeableWeightKg Decimal @db.Decimal(10, 3)
+
+  // --- Classification and pricing snapshot ---
+  orderType   OrderType
+  scope       RateScope
+  paymentType PaymentType
+
+  /// RateCard used at creation time; kept for auditability if the card later changes.
+  rateCardId    String?
+  freightCharge Decimal  @db.Decimal(10, 2)
+  codSurcharge  Decimal  @default(0) @db.Decimal(10, 2)
+  totalCharge   Decimal  @db.Decimal(10, 2)
+
+  /// Amount to collect from the consignee when paymentType = COD.
+  codAmount Decimal? @db.Decimal(10, 2)
+
+  // --- Fulfilment ---
+  assignedAgentId String?
+  status          OrderStatus @default(CREATED)
+  assignedAt      DateTime?
+  deliveredAt     DateTime?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer      User                 @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
+  pickupZone    Zone                 @relation("PickupZone", fields: [pickupZoneId], references: [id], onDelete: Restrict)
+  dropZone      Zone                 @relation("DropZone", fields: [dropZoneId], references: [id], onDelete: Restrict)
+  assignedAgent Agent?               @relation("AssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  statusHistory OrderStatusHistory[]
+
+  @@index([customerId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// ---------------------------------------------------------------------------
+// Append-only audit trail
+// ---------------------------------------------------------------------------
+
+/// APPEND-ONLY. A row is inserted on every order status change and is never
+/// updated or deleted. A database trigger added by the
+/// order_status_history_append_only migration rejects UPDATE and DELETE, so
+/// even an accidental Prisma update call fails at the database boundary.
+model OrderStatusHistory {
+  id      String @id @default(cuid())
+  orderId String
+
+  status OrderStatus
+
+  /// Previous status; null for the row recorded at order creation.
+  fromStatus OrderStatus?
+
+  /// Actor is nullable so history survives a user record being removed —
+  /// the history row itself must never be deleted.
+  actorId   String?
+  actorRole Role
+  note      String?
+
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  actor User? @relation("StatusActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([actorId])
+  @@map("order_status_history")
+}
