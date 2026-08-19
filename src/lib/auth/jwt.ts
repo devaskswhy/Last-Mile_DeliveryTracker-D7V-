@@ -1,4 +1,10 @@
-import { SignJWT, jwtVerify } from "jose";
+// Imported from subpaths rather than the "jose" barrel. The barrel re-exports
+// the JWE (encrypted-token) code, whose deflate helper touches CompressionStream
+// -- which the Edge Runtime static analysis flags as unsupported, even though
+// this module only ever signs and verifies JWS. Narrow imports drop that branch
+// from the middleware bundle and the warning with it.
+import { SignJWT } from "jose/jwt/sign";
+import { jwtVerify } from "jose/jwt/verify";
 
 import { isRole, type Role } from "./roles";
 

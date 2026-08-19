@@ -22,6 +22,17 @@ Two further rules that the database itself enforces:
 2. **Never commit real secrets.** `.env` is gitignored; `.env.example` carries
    placeholders only. Every new variable must be added to `.env.example` in the
    same commit that starts reading it.
+3. **Pricing configuration is data, never code.** No zone name or id, rate,
+   weight slab, surcharge amount or percentage may be written into application
+   code — not as a constant, a default, a fallback, or a hardcoded branch. All
+   of it is read from `zones`, `areas`, `rate_cards` and `cod_surcharge_configs`
+   at request time. Seed files are the one exception: they bootstrap a database,
+   they are not consulted at runtime.
+
+   The enum *mirrors* in `src/lib/domain/enums.ts` are not a violation. They
+   describe the shape of the domain (`B2B` / `B2C`, `INTRA` / `INTER`), which is
+   structural, and each is guarded by a `satisfies` check against the Prisma
+   enum so it cannot drift.
 
 ---
 
@@ -66,7 +77,10 @@ src/
     api/                 Route handlers (REST)
       auth/              register | login | logout
       me/                Current-user probe
-      admin/ agent/      Role-scoped routes
+      admin/             Admin config CRUD (zones, areas, rate cards, COD)
+      agent/             Role-scoped routes
+    admin/               Admin UI — server components read Prisma directly,
+                         client components mutate through the admin API
     login/ forbidden/    Pages that middleware redirects to
   lib/
     api.ts               Shared JSON response envelopes
@@ -79,6 +93,12 @@ src/
       session.ts         Cookie helpers (`next/headers`) — server only
       guard.ts           requireSession / requireRole / requireActiveUser
     validation/          Zod schemas, one module per domain
+      money.ts           Decimal input — validated as strings, never floats
+    domain/
+      enums.ts           Structural enum mirrors + deriveScope()
+    admin/
+      handler.ts         adminRoute() — ADMIN guard + DB error mapping
+      config-health.ts   Rate-card coverage gaps, pincode conflicts
   middleware.ts          Role-based route protection
 ```
 
