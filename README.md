@@ -105,6 +105,100 @@ switched off). Both mean the same thing to a lookup, so both are reported.
 
 ---
 
+## Rate engine
+
+`src/lib/rate-engine/` prices a shipment. The calculation itself is a **pure,
+synchronous function** — same inputs, same output, no I/O — so it is tested
+against object literals with no database and no mocking library:
+
+```ts
+import { calculateRate, loadRateConfig } from "@/lib/rate-engine";
+
+const config = await loadRateConfig(pickupPincode, dropPincode, orderType); // I/O
+const quote = calculateRate(input, config);                                 // pure
+```
+
+`loadRateConfig` is the only part that touches Prisma, and it is imported
+separately so a consumer that already holds the configuration never pulls the
+database in behind it.
+
+### The formula
+
+```
+volumetricWeight = (L × B × H) / volumetricDivisor        # divisor default 5000
+chargeableWeight = max(actualWeight, volumetricWeight)
+billedExcessKg   = ceil(max(0, chargeableWeight − baseWeightKg))
+baseCharge       = baseRate + perKgRate × billedExcessKg
+codSurcharge     = FIXED ? amount : max(minAmount, baseCharge × percentage / 100)
+totalCharge      = baseCharge + codSurcharge
+```
+
+### Why the arithmetic is integer
+
+Every quantity is a `bigint` count of its smallest unit — money in minor units
+(2 dp), weight in grams (3 dp), dimensions in hundredths of a centimetre.
+Nothing uses `number`.
+
+The reason is `ceil`. A shipment entered as a round 2 kg against a 1 kg base
+slab should bill exactly one excess kilogram, but in binary floating point
+`2.0 − 1.0` can land on `1.0000000000000002`, and `Math.ceil` then bills two —
+overcharging a whole per-kg rate on an input that looked perfectly round.
+Integers make that boundary exact by construction rather than by luck. Values
+cross the module boundary as **decimal strings**, so they stay exact from the
+database to the JSON response.
+
+### Failure is typed, never a default
+
+The engine throws `RateEngineError` with a stable `code`. Nothing falls back to
+a default — in particular a missing COD rule does **not** become a zero
+surcharge, because a quote that silently under-charges is worse than one that
+refuses.
+
+| Code | Meaning |
+| ---- | ------- |
+| `PICKUP_AREA_NOT_FOUND` / `DROP_AREA_NOT_FOUND` | Pincode maps to no active area |
+| `PICKUP_ZONE_INACTIVE` / `DROP_ZONE_INACTIVE` | Known address, zone not currently served |
+| `AMBIGUOUS_PICKUP_PINCODE` / `AMBIGUOUS_DROP_PINCODE` | Pincode spans two zones — refuses to guess |
+| `RATE_CARD_NOT_FOUND` | No card for that order type and zone pair |
+| `RATE_CARD_INACTIVE` | A card exists but is switched off |
+| `COD_SURCHARGE_NOT_CONFIGURED` / `COD_SURCHARGE_INACTIVE` | COD asked for with no usable rule |
+| `COD_SURCHARGE_MISCONFIGURED` | Stored row lacks the value its mode needs |
+| `INVALID_MEASUREMENT` | Dimension or weight absent, unparseable, or not positive |
+
+Rate-card lookup is **directional**: `NORTH→SOUTH` is not assumed to price
+`SOUTH→NORTH`. Falling back to the reverse card would be a pricing decision the
+engine is not entitled to make.
+
+### Quote endpoint
+
+`POST /api/orders/quote` — any signed-in role. Read-only: it creates no order
+and no status history, so the order form can call it on every keystroke.
+
+```bash
+curl -b jar.txt -X POST http://localhost:3000/api/orders/quote \
+  -H 'Content-Type: application/json' \
+  -d '{"pickupPincode":"110085","dropPincode":"110017","lengthCm":"50","breadthCm":"50","heightCm":"50","actualWeightKg":"2","orderType":"B2C","paymentType":"COD"}'
+```
+
+Returns the full breakdown — both zones with the area each pincode resolved
+through, all three weights and which one set the chargeable figure, the rate
+card used, an itemised freight derivation, and how the COD surcharge was
+computed — enough to render a real quote rather than just a total.
+
+Errors carry their `code` in `error.details`. An unresolvable address answers
+**422** (the customer can fix it); a configuration gap answers **409** (only an
+admin can), so the frontend can say "we cannot price this route yet" instead of
+blaming the address.
+
+### Tests
+
+```bash
+npm test          # vitest run
+npm run test:watch
+```
+
+---
+
 ## Admin API
 
 Every route below is ADMIN-only, enforced twice: middleware gates `/api/admin/*`

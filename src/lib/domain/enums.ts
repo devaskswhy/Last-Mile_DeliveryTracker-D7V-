@@ -1,5 +1,6 @@
 import type {
   OrderType as PrismaOrderType,
+  PaymentType as PrismaPaymentType,
   RateScope as PrismaRateScope,
   SurchargeMode as PrismaSurchargeMode,
 } from "@prisma/client";
@@ -25,14 +26,19 @@ export type RateScope = (typeof RATE_SCOPES)[number];
 export const SURCHARGE_MODES = ["FIXED", "PERCENTAGE"] as const;
 export type SurchargeMode = (typeof SURCHARGE_MODES)[number];
 
+export const PAYMENT_TYPES = ["PREPAID", "COD"] as const;
+export type PaymentType = (typeof PAYMENT_TYPES)[number];
+
 // Compile-time parity with the Prisma enums.
 const _orderTypeParity = ORDER_TYPES satisfies readonly PrismaOrderType[];
 const _rateScopeParity = RATE_SCOPES satisfies readonly PrismaRateScope[];
 const _surchargeModeParity =
   SURCHARGE_MODES satisfies readonly PrismaSurchargeMode[];
+const _paymentTypeParity = PAYMENT_TYPES satisfies readonly PrismaPaymentType[];
 void _orderTypeParity;
 void _rateScopeParity;
 void _surchargeModeParity;
+void _paymentTypeParity;
 
 /**
  * Scope is *derived*, never chosen. A rate card whose stored scope disagreed

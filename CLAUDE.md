@@ -96,6 +96,12 @@ src/
       money.ts           Decimal input — validated as strings, never floats
     domain/
       enums.ts           Structural enum mirrors + deriveScope()
+    rate-engine/
+      engine.ts          calculateRate() — PURE, synchronous, no I/O
+      decimal.ts         bigint fixed-point; no float ever touches a price
+      errors.ts          RateEngineError + stable error codes
+      config-source.ts   loadRateConfig() — the only part that reads Prisma
+      engine.test.ts     Vitest; fixtures only, no database
     admin/
       handler.ts         adminRoute() — ADMIN guard + DB error mapping
       config-health.ts   Rate-card coverage gaps, pincode conflicts
@@ -109,8 +115,11 @@ Conventions:
   validate before touching the database — never trust a request body.
 - Route handlers return the envelopes from `src/lib/api.ts`
   (`ok` / `fail` / `validationFailed`), so clients parse one shape.
-- Money and weights are Prisma `Decimal`, never `Float`. Convert at the edge
-  for display only.
+- Money and weights are Prisma `Decimal`, never `Float`. They cross every
+  boundary as decimal **strings** and are computed as `bigint` counts of minor
+  units / grams in `src/lib/rate-engine/decimal.ts`. No quantity that reaches a
+  price is ever a JavaScript `number` — `ceil(chargeable - baseWeight)` turns a
+  float epsilon into a whole extra kilogram billed.
 - Database tables are `snake_case` via `@@map`; Prisma models stay `PascalCase`
   and fields `camelCase`.
 
@@ -161,6 +170,8 @@ npm run db:migrate   # prisma migrate dev
 npm run db:deploy    # prisma migrate deploy (CI/production)
 npm run db:seed      # Idempotent seed
 npm run db:studio    # Prisma Studio
+npm test             # Vitest (rate engine unit tests)
+npm run test:watch   # Vitest in watch mode
 ```
 
 Seeded accounts. Passwords are **never** written down here — the seed reads
