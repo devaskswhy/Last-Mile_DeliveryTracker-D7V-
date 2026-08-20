@@ -2,6 +2,14 @@ import Link from "next/link";
 
 import { ORDER_STATUSES, type OrderStatus } from "@/lib/domain/enums";
 import { ACTIVE_ORDER_STATUSES, isClosedStatus } from "@/lib/domain/order-status";
+import {
+  EmptyRow,
+  PageHeading,
+  Table,
+  Tag,
+  cellClass,
+  rowClass,
+} from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 
 import { AssignmentControls, type AgentOption } from "./AssignmentControls";
@@ -113,33 +121,33 @@ export default async function AdminOrdersPage({
 
   return (
     <section className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-medium">Orders</h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            Filter by status, zone or agent. Any status can be overridden — the
-            reason is recorded in the order&rsquo;s history.
-          </p>
-        </div>
-        <Link
-          href="/admin/orders/new"
-          className="rounded bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900"
-        >
-          New order for a customer
-        </Link>
-      </div>
+      <PageHeading
+        eyebrow="Operations"
+        title="Orders"
+        action={
+          <Link
+            href="/admin/orders/new"
+            className="rounded-full bg-signal px-4 py-2 text-caption font-medium text-ink transition-transform duration-fast ease-signature hover:scale-[1.03]"
+          >
+            New order
+          </Link>
+        }
+      >
+        Filter by status, zone or agent. Any status can be overridden — the
+        reason is recorded in the order&rsquo;s history.
+      </PageHeading>
 
       {/* A GET form so every filtered view is a shareable, bookmarkable URL. */}
       <form
         method="get"
-        className="flex flex-wrap items-end gap-3 rounded border border-gray-200 p-4 dark:border-gray-800"
+        className="grid gap-4 rounded-2xl border border-ink-line bg-ink-soft p-5 sm:grid-cols-2 lg:grid-cols-[repeat(3,minmax(0,1fr))_auto_auto] lg:items-end"
       >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-gray-700 dark:text-gray-300">Status</span>
+        <label className="flex min-w-0 flex-col gap-2 text-caption">
+          <span className="text-eyebrow uppercase text-ink-muted">Status</span>
           <select
             name="status"
             defaultValue={filters.status ?? ""}
-            className="rounded border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+            className="w-full min-w-0 rounded-xl border border-ink-line bg-ink px-3 py-2.5 text-caption text-ink-bright outline-none transition-colors duration-fast ease-signature focus:border-signal"
           >
             <option value="">Any</option>
             {ORDER_STATUSES.map((status) => (
@@ -150,12 +158,12 @@ export default async function AdminOrdersPage({
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-gray-700 dark:text-gray-300">Zone</span>
+        <label className="flex min-w-0 flex-col gap-2 text-caption">
+          <span className="text-eyebrow uppercase text-ink-muted">Zone</span>
           <select
             name="zone"
             defaultValue={filters.zone ?? ""}
-            className="rounded border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+            className="w-full min-w-0 rounded-xl border border-ink-line bg-ink px-3 py-2.5 text-caption text-ink-bright outline-none transition-colors duration-fast ease-signature focus:border-signal"
           >
             <option value="">Any</option>
             {zones.map((zone) => (
@@ -166,12 +174,12 @@ export default async function AdminOrdersPage({
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-gray-700 dark:text-gray-300">Agent</span>
+        <label className="flex min-w-0 flex-col gap-2 text-caption">
+          <span className="text-eyebrow uppercase text-ink-muted">Agent</span>
           <select
             name="agent"
             defaultValue={filters.agent ?? ""}
-            className="rounded border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+            className="w-full min-w-0 rounded-xl border border-ink-line bg-ink px-3 py-2.5 text-caption text-ink-bright outline-none transition-colors duration-fast ease-signature focus:border-signal"
           >
             <option value="">Any</option>
             <option value="UNASSIGNED">Unassigned</option>
@@ -185,14 +193,14 @@ export default async function AdminOrdersPage({
 
         <button
           type="submit"
-          className="rounded bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900"
+          className="h-fit rounded-full bg-signal px-5 py-2.5 text-caption font-medium text-ink transition-transform duration-fast ease-signature hover:scale-[1.03]"
         >
           Apply
         </button>
         {isFiltered ? (
           <Link
             href="/admin/orders"
-            className="px-2 py-1.5 text-sm text-gray-600 underline-offset-4 hover:underline dark:text-gray-400"
+            className="px-2 py-1.5 text-caption text-ink-muted underline-offset-4 hover:text-signal hover:underline"
           >
             Clear
           </Link>
@@ -201,70 +209,67 @@ export default async function AdminOrdersPage({
 
       <div className="flex flex-wrap gap-3">
         {unassigned.length > 0 ? (
-          <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <p className="rounded border border-signal/40 bg-signal-wash px-4 py-3 text-caption text-ink-bright">
             {unassigned.length} waiting for an agent
           </p>
         ) : null}
         {failed.length > 0 ? (
-          <p className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+          <p className="rounded border border-signal bg-signal-wash px-4 py-3 text-caption text-ink-bright">
             {failed.length} failed — awaiting a reschedule from the customer
           </p>
         ) : null}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-gray-300 dark:border-gray-700">
-              {["Order", "Customer", "Route", "Status", "Agent", "Total", "Actions"].map(
-                (header) => (
-                  <th key={header} className="py-2 pr-4 font-medium whitespace-nowrap">
-                    {header}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
+      <Table
+        headers={[
+          "Order",
+          "Customer",
+          "Route",
+          "Status",
+          "Agent",
+          "Total",
+          "Actions",
+        ]}
+      >
             {orders.map((order) => (
               <tr
                 key={order.id}
-                className="border-b border-gray-100 align-top dark:border-gray-800"
+                className={rowClass}
               >
-                <td className="py-3 pr-4">
+                <td className={cellClass}>
                   <Link
                     href={`/orders/${order.id}`}
-                    className="font-mono text-xs underline-offset-4 hover:underline"
+                    className="font-mono text-caption underline-offset-4 hover:underline"
                   >
                     {order.orderNumber}
                   </Link>
                   {order._count.attempts > 1 ? (
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="text-[0.6875rem] text-ink-muted">
                       {order._count.attempts} attempts
                     </div>
                   ) : null}
                 </td>
-                <td className="py-3 pr-4">{order.customer.name}</td>
-                <td className="py-3 pr-4 font-mono text-xs">
+                <td className={cellClass}>{order.customer.name}</td>
+                <td className="py-3 pr-4 font-mono text-caption">
                   {order.pickupZone.code} → {order.dropZone.code}
                 </td>
-                <td className="py-3 pr-4 font-mono text-xs">{order.status}</td>
-                <td className="py-3 pr-4">
+                <td className="py-3 pr-4 font-mono text-caption">{order.status}</td>
+                <td className={cellClass}>
                   {order.assignedAgent ? (
                     <span>
                       {order.assignedAgent.user.name}{" "}
-                      <span className="font-mono text-xs text-gray-500">
+                      <span className="font-mono text-caption text-ink-muted">
                         ({order.assignedAgent.employeeCode})
                       </span>
                     </span>
                   ) : (
-                    <span className="text-amber-700 dark:text-amber-400">Unassigned</span>
+                    <span className="text-signal">Unassigned</span>
                   )}
                 </td>
-                <td className="py-3 pr-4 font-mono text-xs">
+                <td className="py-3 pr-4 font-mono text-caption">
                   {order.totalCharge.toString()}
                 </td>
-                <td className="py-3 pr-4">
+                <td className={cellClass}>
                   <div className="flex flex-col gap-2">
                     <AssignmentControls
                       order={{
@@ -294,16 +299,12 @@ export default async function AdminOrdersPage({
                 </td>
               </tr>
             ))}
-            {orders.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="py-4 text-gray-500 dark:text-gray-400">
-                  {isFiltered ? "No orders match these filters." : "No orders yet."}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+        {orders.length === 0 ? (
+          <EmptyRow span={7}>
+            {isFiltered ? "No orders match these filters." : "No orders yet."}
+          </EmptyRow>
+        ) : null}
+      </Table>
     </section>
   );
 }

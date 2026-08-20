@@ -19,8 +19,8 @@ export default async function AdminNewOrderPage() {
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-medium">New order for a customer</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        <h2 className="text-title text-ink-bright">New order for a customer</h2>
+        <p className="mt-1 text-caption text-ink-muted">
           Same pricing and confirmation as the customer flow — the order is
           recorded against the customer you select, and the history records that
           you created it.

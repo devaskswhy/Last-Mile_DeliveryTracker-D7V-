@@ -1,4 +1,5 @@
 import { getConfigHealth } from "@/lib/admin/config-health";
+import { PageHeading } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 
 import { RateCardManager, type RateCardRow } from "./RateCardManager";
@@ -43,15 +44,14 @@ export default async function RateCardsPage() {
   }));
 
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-medium">Rate cards</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+    <section className="flex flex-col gap-8">
+      <PageHeading eyebrow="Pricing" title="Rate cards">
+        <span className="block">
           One card per order type and zone pair. Scope is not a choice — a card
           within one zone is INTRA, one between two zones is INTER — so an
           N-zone grid needs 2 × N² cards in total.
-        </p>
-      </div>
+        </span>
+      </PageHeading>
       <RateCardManager rateCards={rows} zones={zones} gaps={health.rateCards.gaps} />
     </section>
   );

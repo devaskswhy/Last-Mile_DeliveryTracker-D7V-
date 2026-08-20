@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 
 import { ZoneManager, type ZoneRow } from "./ZoneManager";
@@ -35,15 +36,14 @@ export default async function ZonesPage() {
   }));
 
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-medium">Zones</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+    <section className="flex flex-col gap-8">
+      <PageHeading eyebrow="Geography" title="Zones">
+        <span className="block">
           A zone is the unit rate cards are priced between. Adding one means
           every existing zone needs new inter-zone cards in both directions —
           check the overview for gaps afterwards.
-        </p>
-      </div>
+        </span>
+      </PageHeading>
       <ZoneManager zones={rows} />
     </section>
   );

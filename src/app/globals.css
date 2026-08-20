@@ -22,12 +22,14 @@ body {
 }
 
 /*
- * The public surface opts into the dark identity explicitly rather than the
- * theme being forced globally. Internal pages already ship light and dark
- * variants keyed to `prefers-color-scheme`; flipping the base underneath them
- * would put dark text on a dark background for anyone on a light OS.
+ * The dark identity, opted into by a class rather than forced on `<body>`.
+ *
+ * Both the public surface and the signed-in dashboards use it, so the whole
+ * product is one theme. It stays a class rather than a global so a page that
+ * has not been converted cannot end up with dark text on a dark ground.
  */
-.surface-public {
+.surface-public,
+.surface-app {
   --background: #08090a;
   --foreground: #f2f5f3;
   background: var(--background);
@@ -41,7 +43,8 @@ body {
   }
 
   /* One visible focus treatment, in the one accent. */
-  .surface-public :focus-visible {
+  .surface-public :focus-visible,
+  .surface-app :focus-visible {
     outline: 2px solid #d6ff3d;
     outline-offset: 3px;
     border-radius: 2px;

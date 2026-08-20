@@ -108,7 +108,7 @@ export function CodSurchargeManager({
 
       <form
         onSubmit={save}
-        className="flex flex-wrap items-end gap-3 rounded border border-gray-200 p-4 dark:border-gray-800"
+        className="flex flex-wrap items-end gap-3 rounded-2xl border border-ink-line bg-ink-soft p-5"
       >
         <Field label="Order type">
           <select
@@ -177,8 +177,8 @@ export function CodSurchargeManager({
       <Table headers={["Order type", "Mode", "Value", "Minimum", "Status", ""]}>
         {surcharges.map((row) => (
           <tr key={row.orderType} className={rowClass}>
-            <td className={`${cellClass} font-mono text-xs`}>{row.orderType}</td>
-            <td className={`${cellClass} font-mono text-xs`}>{row.mode}</td>
+            <td className={`${cellClass} font-mono text-caption`}>{row.orderType}</td>
+            <td className={`${cellClass} font-mono text-caption`}>{row.mode}</td>
             <td className={cellClass}>
               {row.mode === "FIXED" ? row.amount : `${row.percentage}%`}
             </td>
@@ -193,7 +193,7 @@ export function CodSurchargeManager({
         ))}
         {surcharges.length === 0 ? (
           <tr>
-            <td colSpan={6} className="py-4 text-gray-500 dark:text-gray-400">
+            <td colSpan={6} className="py-4 text-ink-muted">
               Nothing configured yet.
             </td>
           </tr>

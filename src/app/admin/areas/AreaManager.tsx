@@ -105,7 +105,7 @@ export function AreaManager({
 
       <form
         onSubmit={createArea}
-        className="flex flex-wrap items-end gap-3 rounded border border-gray-200 p-4 dark:border-gray-800"
+        className="flex flex-wrap items-end gap-3 rounded-2xl border border-ink-line bg-ink-soft p-5"
       >
         <Field label="Area name">
           <input
@@ -147,7 +147,7 @@ export function AreaManager({
       <Table headers={["Pincode", "Area", "Zone", "Status", ""]}>
         {areas.map((area) => (
           <tr key={area.id} className={rowClass}>
-            <td className={`${cellClass} font-mono text-xs`}>{area.pincode}</td>
+            <td className={`${cellClass} font-mono text-caption`}>{area.pincode}</td>
             <td className={cellClass}>{area.name}</td>
             <td className={cellClass}>
               <select
@@ -177,7 +177,7 @@ export function AreaManager({
         ))}
         {areas.length === 0 ? (
           <tr>
-            <td colSpan={5} className="py-4 text-gray-500 dark:text-gray-400">
+            <td colSpan={5} className="py-4 text-ink-muted">
               No areas yet.
             </td>
           </tr>

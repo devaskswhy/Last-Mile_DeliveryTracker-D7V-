@@ -83,7 +83,7 @@ export function ZoneManager({ zones }: { zones: ZoneRow[] }) {
 
       <form
         onSubmit={createZone}
-        className="flex flex-wrap items-end gap-3 rounded border border-gray-200 p-4 dark:border-gray-800"
+        className="flex flex-wrap items-end gap-3 rounded-2xl border border-ink-line bg-ink-soft p-5"
       >
         <Field label="Name">
           <input
@@ -120,12 +120,12 @@ export function ZoneManager({ zones }: { zones: ZoneRow[] }) {
 
           return (
             <tr key={zone.id} className={rowClass}>
-              <td className={`${cellClass} font-mono text-xs`}>{zone.code}</td>
+              <td className={`${cellClass} font-mono text-caption`}>{zone.code}</td>
               <td className={cellClass}>{zone.name}</td>
               <td className={cellClass}>
                 {zone.isActive ? "Active" : "Inactive"}
               </td>
-              <td className={`${cellClass} text-gray-500 dark:text-gray-400`}>
+              <td className={`${cellClass} text-ink-muted`}>
                 {refs.length ? refs.join(", ") : "—"}
               </td>
               <td className={cellClass}>
@@ -151,7 +151,7 @@ export function ZoneManager({ zones }: { zones: ZoneRow[] }) {
         })}
         {zones.length === 0 ? (
           <tr>
-            <td colSpan={5} className="py-4 text-gray-500 dark:text-gray-400">
+            <td colSpan={5} className="py-4 text-ink-muted">
               No zones yet. Add one above.
             </td>
           </tr>

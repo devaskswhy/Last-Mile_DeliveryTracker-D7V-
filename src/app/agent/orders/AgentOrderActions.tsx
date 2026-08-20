@@ -12,8 +12,12 @@ export interface AgentOrderRow {
   status: string;
   pickupCity: string;
   pickupPincode: string;
+  pickupAddressLine1: string;
   dropCity: string;
   dropPincode: string;
+  dropAddressLine1: string;
+  dropContactName: string;
+  dropPhone: string;
   paymentType: string;
   codAmount: string | null;
   totalCharge: string;
@@ -67,8 +71,8 @@ export function AgentOrderActions({ order }: { order: AgentOrderRow }) {
 
   if (order.nextStatuses.length === 0) {
     return (
-      <span className="text-xs text-gray-500 dark:text-gray-400">
-        No action available
+      <span className="text-caption text-ink-muted">
+        No action available at this status
       </span>
     );
   }
@@ -80,9 +84,9 @@ export function AgentOrderActions({ order }: { order: AgentOrderRow }) {
       {askingReason ? (
         // A failure without a reason is useless to the customer deciding
         // whether to rebook, so the reason is collected before it is recorded.
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <input
-            className={`${inputClass} w-64`}
+            className={`${inputClass} sm:w-72`}
             value={failureReason}
             onChange={(event) => setFailureReason(event.target.value)}
             placeholder="Why did the delivery fail?"

@@ -84,7 +84,7 @@ export function AssignmentControls({
 
   if (order.isTerminal) {
     return (
-      <span className="text-xs text-gray-500 dark:text-gray-400">
+      <span className="text-[0.6875rem] text-ink-muted">
         {order.status} — closed
       </span>
     );

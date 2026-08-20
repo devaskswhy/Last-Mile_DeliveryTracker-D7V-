@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 
 import { AreaManager } from "./AreaManager";
@@ -18,16 +19,15 @@ export default async function AreasPage() {
   ]);
 
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-medium">Areas</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+    <section className="flex flex-col gap-8">
+      <PageHeading eyebrow="Geography" title="Areas">
+        <span className="block">
           Each area maps a pincode to exactly one zone. Pickup and drop
           addresses resolve to a zone through this table, so the same pincode
           may not appear under two different zones — that would make the
           resolution ambiguous and price one address two ways.
-        </p>
-      </div>
+        </span>
+      </PageHeading>
       <AreaManager areas={areas} zones={zones} />
     </section>
   );

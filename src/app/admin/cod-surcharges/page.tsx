@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 
 import { CodSurchargeManager, type SurchargeRow } from "./CodSurchargeManager";
@@ -19,15 +20,14 @@ export default async function CodSurchargesPage() {
   }));
 
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-medium">COD surcharges</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+    <section className="flex flex-col gap-8">
+      <PageHeading eyebrow="Pricing" title="COD surcharges">
+        <span className="block">
           One rule per order type, applied on top of freight when an order is
           paid cash on delivery. A flat amount, or a percentage of the freight
           charge with an optional floor.
-        </p>
-      </div>
+        </span>
+      </PageHeading>
       <CodSurchargeManager surcharges={rows} />
     </section>
   );

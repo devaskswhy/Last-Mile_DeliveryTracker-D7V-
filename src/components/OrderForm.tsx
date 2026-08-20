@@ -1,14 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ORDER_TYPES, PAYMENT_TYPES } from "@/lib/domain/enums";
 
 import { apiRequest } from "./client";
-import { Button, Field, Notice, inputClass } from "./ui";
+import { Button, Field, Notice, Panel, Tag, inputClass } from "./ui";
 
-/** Mirrors the quote payload the rate engine returns. */
 interface Quote {
   pickupZone: { code: string; name: string; resolvedArea: { name: string } };
   dropZone: { code: string; name: string; resolvedArea: { name: string } };
@@ -58,19 +57,13 @@ const emptyAddress = {
 
 type Address = typeof emptyAddress;
 
-/**
- * Order form with a live quote and an explicit confirmation step.
- *
- * The quote is bound to the exact inputs that produced it. Editing any field
- * that affects the price clears it, so the confirm button can never submit a
- * total the customer is no longer looking at — and the server independently
- * refuses a confirmation whose total does not match what it recomputes.
- */
+/** Waits for typing to stop before spending a request on a half-typed pincode. */
+const QUOTE_DEBOUNCE_MS = 450;
+
 export function OrderForm({
   customers,
   createdBy,
 }: {
-  /** Present only for the admin "create on behalf of" flow. */
   customers?: CustomerOption[];
   createdBy: "CUSTOMER" | "ADMIN";
 }) {
@@ -91,17 +84,22 @@ export function OrderForm({
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quotedFor, setQuotedFor] = useState<string | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
 
-  // Identity of the priced shipment. If this changes, the quote on screen no
-  // longer describes what the form says, so it stops counting as confirmed.
+  /**
+   * The identity of the priced shipment. Everything that changes the price is
+   * in here and nothing that does not — editing a contact name must not throw
+   * away a valid quote.
+   */
   const priceKey = useMemo(
     () =>
       JSON.stringify({
-        p: pickup.pincode,
-        d: drop.pincode,
+        p: pickup.pincode.trim(),
+        d: drop.pincode.trim(),
         lengthCm,
         breadthCm,
         heightCm,
@@ -123,23 +121,24 @@ export function OrderForm({
 
   const quoteIsCurrent = quote !== null && quotedFor === priceKey;
 
-  const customerOptions = useMemo(() => {
-    if (!customers) return [];
-    const needle = customerQuery.trim().toLowerCase();
-    if (!needle) return customers.slice(0, 20);
-    return customers
-      .filter(
-        (c) =>
-          c.name.toLowerCase().includes(needle) ||
-          c.email.toLowerCase().includes(needle),
-      )
-      .slice(0, 20);
-  }, [customers, customerQuery]);
+  const readyToQuote =
+    pickup.pincode.trim() !== "" &&
+    drop.pincode.trim() !== "" &&
+    lengthCm !== "" &&
+    breadthCm !== "" &&
+    heightCm !== "" &&
+    actualWeightKg !== "";
 
-  async function getQuote() {
-    setBusy(true);
-    setError(null);
-    setCreated(null);
+  // Guards against an older in-flight quote overwriting a newer one when the
+  // user keeps typing — responses can arrive out of order.
+  const requestId = useRef(0);
+
+  const fetchQuote = useCallback(async () => {
+    const id = ++requestId.current;
+    const keyAtRequest = priceKey;
+
+    setQuoting(true);
+    setQuoteError(null);
 
     const result = await apiRequest<{ quote: Quote }>("/api/orders/quote", {
       method: "POST",
@@ -155,17 +154,55 @@ export function OrderForm({
       }),
     });
 
-    setBusy(false);
+    if (id !== requestId.current) return; // A newer request has superseded this.
+
+    setQuoting(false);
     if (!result.ok || !result.data) {
       setQuote(null);
       setQuotedFor(null);
-      setError(result.error ?? "Could not price this shipment");
+      setQuoteError(result.error ?? "Could not price this shipment");
       return;
     }
-
     setQuote(result.data.quote);
-    setQuotedFor(priceKey);
-  }
+    setQuotedFor(keyAtRequest);
+  }, [
+    priceKey,
+    pickup.pincode,
+    drop.pincode,
+    lengthCm,
+    breadthCm,
+    heightCm,
+    actualWeightKg,
+    orderType,
+    paymentType,
+  ]);
+
+  /** Live quoting: re-prices as the pricing fields are filled in. */
+  useEffect(() => {
+    if (!readyToQuote) {
+      setQuote(null);
+      setQuotedFor(null);
+      setQuoteError(null);
+      return;
+    }
+    if (quotedFor === priceKey) return;
+
+    const timer = window.setTimeout(fetchQuote, QUOTE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [readyToQuote, priceKey, quotedFor, fetchQuote]);
+
+  const customerOptions = useMemo(() => {
+    if (!customers) return [];
+    const needle = customerQuery.trim().toLowerCase();
+    if (!needle) return customers.slice(0, 20);
+    return customers
+      .filter(
+        (c) =>
+          c.name.toLowerCase().includes(needle) ||
+          c.email.toLowerCase().includes(needle),
+      )
+      .slice(0, 20);
+  }, [customers, customerQuery]);
 
   async function confirm() {
     if (!quote || !quoteIsCurrent) return;
@@ -174,6 +211,7 @@ export function OrderForm({
     setError(null);
 
     const result = await apiRequest<{
+      orderId: string;
       orderNumber: string;
       assignment:
         | { assigned: true; agentName: string; employeeCode: string }
@@ -200,7 +238,8 @@ export function OrderForm({
     setBusy(false);
     if (!result.ok || !result.data) {
       setError(result.error ?? "Could not create the order");
-      // A stale quote must be re-fetched before the button works again.
+      // A rejected confirmation invalidates the quote, so the button re-locks
+      // until a fresh price has been fetched and seen.
       setQuotedFor(null);
       return;
     }
@@ -208,21 +247,12 @@ export function OrderForm({
     const assignment = result.data.assignment;
     setCreated(
       assignment.assigned
-        ? `Order ${result.data.orderNumber} created and auto-assigned to ${assignment.agentName} (${assignment.employeeCode}).`
+        ? `Order ${result.data.orderNumber} created — ${assignment.agentName} (${assignment.employeeCode}) is collecting it.`
         : `Order ${result.data.orderNumber} created. ${assignment.reason} — an admin will assign it.`,
     );
-    setQuote(null);
-    setQuotedFor(null);
+    router.push(`/orders/${result.data.orderId}`);
     router.refresh();
   }
-
-  const canQuote =
-    pickup.pincode.trim() !== "" &&
-    drop.pincode.trim() !== "" &&
-    lengthCm !== "" &&
-    breadthCm !== "" &&
-    heightCm !== "" &&
-    actualWeightKg !== "";
 
   const canConfirm =
     quoteIsCurrent &&
@@ -233,112 +263,119 @@ export function OrderForm({
     isAddressComplete(drop);
 
   return (
-    <div className="flex flex-col gap-6">
-      {error ? <Notice kind="error">{error}</Notice> : null}
-      {created ? <Notice kind="success">{created}</Notice> : null}
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+      <div className="flex flex-col gap-6">
+        {error ? <Notice kind="error">{error}</Notice> : null}
+        {created ? <Notice kind="success">{created}</Notice> : null}
 
-      {createdBy === "ADMIN" ? (
-        <section className="rounded border border-gray-200 p-4 dark:border-gray-800">
-          <h3 className="mb-3 text-sm font-medium">Customer</h3>
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="Search" hint="By name or email">
-              <input
-                className={inputClass}
-                value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
-                placeholder="Search customers"
-              />
+        {createdBy === "ADMIN" ? (
+          <Panel>
+            <p className="mb-4 text-eyebrow uppercase text-signal">Customer</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Search" hint="By name or email">
+                <input
+                  className={inputClass}
+                  value={customerQuery}
+                  onChange={(e) => setCustomerQuery(e.target.value)}
+                  placeholder="Search"
+                />
+              </Field>
+              <Field label="Order is for">
+                <select
+                  className={inputClass}
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  required
+                >
+                  <option value="">Select a customer…</option>
+                  {customerOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {c.email}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </Panel>
+        ) : null}
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <AddressFields title="Pickup" value={pickup} onChange={setPickup} />
+          <AddressFields title="Drop" value={drop} onChange={setDrop} />
+        </div>
+
+        <Panel>
+          <p className="mb-4 text-eyebrow uppercase text-signal">Parcel</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <Field label="Length cm">
+              <input className={inputClass} inputMode="decimal" value={lengthCm} onChange={(e) => setLengthCm(e.target.value)} />
             </Field>
-            <Field label="Order is for">
-              <select
-                className={inputClass}
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                required
-              >
-                <option value="">Select a customer…</option>
-                {customerOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} — {c.email}
-                  </option>
+            <Field label="Breadth cm">
+              <input className={inputClass} inputMode="decimal" value={breadthCm} onChange={(e) => setBreadthCm(e.target.value)} />
+            </Field>
+            <Field label="Height cm">
+              <input className={inputClass} inputMode="decimal" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
+            </Field>
+            <Field label="Weight kg">
+              <input className={inputClass} inputMode="decimal" value={actualWeightKg} onChange={(e) => setActualWeightKg(e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <Field label="Order type">
+              <select className={inputClass} value={orderType} onChange={(e) => setOrderType(e.target.value)}>
+                {ORDER_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </Field>
-          </div>
-        </section>
-      ) : null}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <AddressFields title="Pickup" value={pickup} onChange={setPickup} />
-        <AddressFields title="Drop" value={drop} onChange={setDrop} />
-      </div>
-
-      <section className="rounded border border-gray-200 p-4 dark:border-gray-800">
-        <h3 className="mb-3 text-sm font-medium">Parcel</h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Length (cm)">
-            <input className={`${inputClass} w-24`} value={lengthCm} onChange={(e) => setLengthCm(e.target.value)} />
-          </Field>
-          <Field label="Breadth (cm)">
-            <input className={`${inputClass} w-24`} value={breadthCm} onChange={(e) => setBreadthCm(e.target.value)} />
-          </Field>
-          <Field label="Height (cm)">
-            <input className={`${inputClass} w-24`} value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
-          </Field>
-          <Field label="Actual weight (kg)">
-            <input className={`${inputClass} w-28`} value={actualWeightKg} onChange={(e) => setActualWeightKg(e.target.value)} />
-          </Field>
-          <Field label="Order type">
-            <select className={inputClass} value={orderType} onChange={(e) => setOrderType(e.target.value)}>
-              {ORDER_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Payment">
-            <select className={inputClass} value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
-              {PAYMENT_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-          {paymentType === "COD" ? (
-            <Field label="Collect from consignee" hint="Goods value, not freight">
-              <input className={`${inputClass} w-32`} value={codAmount} onChange={(e) => setCodAmount(e.target.value)} />
+            <Field label="Payment">
+              <select className={inputClass} value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
+                {PAYMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </Field>
-          ) : null}
-        </div>
-        <div className="mt-3">
-          <Field label="Notes (optional)">
-            <input className={`${inputClass} w-full`} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </Field>
-        </div>
-      </section>
+            {paymentType === "COD" ? (
+              <Field label="Collect on delivery" hint="Goods value, not freight">
+                <input className={inputClass} inputMode="decimal" value={codAmount} onChange={(e) => setCodAmount(e.target.value)} />
+              </Field>
+            ) : null}
+          </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="secondary" disabled={!canQuote || busy} onClick={getQuote}>
-          {busy ? "Working…" : quoteIsCurrent ? "Refresh quote" : "Get quote"}
-        </Button>
-        {quote && !quoteIsCurrent ? (
-          <span className="text-sm text-amber-700 dark:text-amber-400">
-            The parcel changed — get a new quote before confirming.
-          </span>
-        ) : null}
+          <div className="mt-4">
+            <Field label="Notes (optional)">
+              <input className={inputClass} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </Field>
+          </div>
+        </Panel>
       </div>
 
-      {quote && quoteIsCurrent ? (
-        <QuoteBreakdown quote={quote} />
-      ) : null}
+      {/* Quote panel. Sticky on desktop so the price stays in view while the
+          form is filled; in normal flow on a phone, where sticky would eat the
+          viewport. */}
+      <div className="lg:sticky lg:top-32">
+        <QuotePanel
+          quote={quoteIsCurrent ? quote : null}
+          quoting={quoting}
+          error={quoteError}
+          ready={readyToQuote}
+          stale={quote !== null && !quoteIsCurrent}
+        />
 
-      <div>
-        <Button disabled={!canConfirm} onClick={confirm}>
+        <Button
+          onClick={confirm}
+          disabled={!canConfirm}
+          className="mt-5 w-full py-3.5"
+        >
           {busy ? "Creating…" : "Confirm and create order"}
         </Button>
-        {!quoteIsCurrent ? (
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            A current quote is required before an order can be created.
-          </p>
-        ) : null}
+
+        <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-muted">
+          {quoteIsCurrent
+            ? "The server re-prices this on confirm and rejects it if the total has changed."
+            : "A current quote is required before an order can be created."}
+        </p>
       </div>
     </div>
   );
@@ -346,7 +383,7 @@ export function OrderForm({
 
 function isAddressComplete(address: Address): boolean {
   return (
-    address.contactName.trim() !== "" &&
+    address.contactName.trim().length >= 2 &&
     address.phone.trim() !== "" &&
     address.addressLine1.trim() !== "" &&
     address.city.trim() !== "" &&
@@ -367,14 +404,14 @@ function AddressFields({
     onChange({ ...value, [key]: event.target.value });
 
   return (
-    <section className="rounded border border-gray-200 p-4 dark:border-gray-800">
-      <h3 className="mb-3 text-sm font-medium">{title}</h3>
-      <div className="flex flex-col gap-3">
+    <Panel>
+      <p className="mb-4 text-eyebrow uppercase text-signal">{title}</p>
+      <div className="flex flex-col gap-4">
         <Field label="Contact name">
           <input className={inputClass} value={value.contactName} onChange={set("contactName")} />
         </Field>
         <Field label="Phone">
-          <input className={inputClass} value={value.phone} onChange={set("phone")} />
+          <input className={inputClass} inputMode="tel" value={value.phone} onChange={set("phone")} />
         </Field>
         <Field label="Address line 1">
           <input className={inputClass} value={value.addressLine1} onChange={set("addressLine1")} />
@@ -382,104 +419,148 @@ function AddressFields({
         <Field label="Address line 2 (optional)">
           <input className={inputClass} value={value.addressLine2} onChange={set("addressLine2")} />
         </Field>
-        <Field label="City">
-          <input className={inputClass} value={value.city} onChange={set("city")} />
-        </Field>
-        <Field label="Pincode" hint="Resolves the delivery zone">
-          <input className={inputClass} value={value.pincode} onChange={set("pincode")} />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="City">
+            <input className={inputClass} value={value.city} onChange={set("city")} />
+          </Field>
+          <Field label="Pincode" hint="Sets the zone">
+            <input className={inputClass} value={value.pincode} onChange={set("pincode")} />
+          </Field>
+        </div>
       </div>
-    </section>
+    </Panel>
   );
 }
 
-/** The itemised quote — every figure the charge was built from, not just a total. */
-function QuoteBreakdown({ quote }: { quote: Quote }) {
-  const row = "flex justify-between gap-4 py-1";
+/** The itemised quote — every figure the charge was built from, not a total. */
+function QuotePanel({
+  quote,
+  quoting,
+  error,
+  ready,
+  stale,
+}: {
+  quote: Quote | null;
+  quoting: boolean;
+  error: string | null;
+  ready: boolean;
+  stale: boolean;
+}) {
+  const line = "flex items-baseline justify-between gap-3 py-1.5";
 
   return (
-    <section className="rounded border border-gray-300 p-4 dark:border-gray-700">
-      <h3 className="text-sm font-medium">Quote</h3>
-
-      <div className="mt-3 grid gap-6 sm:grid-cols-2">
-        <div className="text-sm">
-          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Route
-          </div>
-          <div className={row}>
-            <span>Pickup zone</span>
-            <span className="font-mono">
-              {quote.pickupZone.code} ({quote.pickupZone.resolvedArea.name})
-            </span>
-          </div>
-          <div className={row}>
-            <span>Drop zone</span>
-            <span className="font-mono">
-              {quote.dropZone.code} ({quote.dropZone.resolvedArea.name})
-            </span>
-          </div>
-          <div className={row}>
-            <span>Scope</span>
-            <span className="font-mono">{quote.scope}</span>
-          </div>
-        </div>
-
-        <div className="text-sm">
-          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Weight
-          </div>
-          <div className={row}>
-            <span>Actual</span>
-            <span className="font-mono">{quote.actualWeight} kg</span>
-          </div>
-          <div className={row}>
-            <span>Volumetric (÷{quote.volumetricDivisor})</span>
-            <span className="font-mono">{quote.volumetricWeight} kg</span>
-          </div>
-          <div className={`${row} font-medium`}>
-            <span>Chargeable ({quote.chargeableWeightBasis.toLowerCase()})</span>
-            <span className="font-mono">{quote.chargeableWeight} kg</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 border-t border-gray-200 pt-3 text-sm dark:border-gray-800">
-        <div className={row}>
-          <span>
-            Base rate (first {quote.freightBreakdown.baseWeightKg} kg)
+    <Panel className="relative overflow-hidden">
+      <div className="flex items-center justify-between">
+        <p className="text-eyebrow uppercase text-signal">Live quote</p>
+        {quoting ? (
+          <span className="flex items-center gap-1.5 text-[0.6875rem] text-ink-muted">
+            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-signal" />
+            pricing
           </span>
-          <span className="font-mono">{quote.freightBreakdown.baseRate}</span>
-        </div>
-        <div className={row}>
-          <span>
-            Excess {quote.freightBreakdown.excessWeightKg} kg → billed{" "}
-            {quote.freightBreakdown.billedExcessKg} kg × {quote.freightBreakdown.perKgRate}
-          </span>
-          <span className="font-mono">{quote.freightBreakdown.excessCharge}</span>
-        </div>
-        <div className={`${row} border-t border-gray-100 pt-2 dark:border-gray-900`}>
-          <span>Freight</span>
-          <span className="font-mono">{quote.baseCharge}</span>
-        </div>
-
-        {quote.codBreakdown ? (
-          <div className={row}>
-            <span>
-              COD surcharge (
-              {quote.codBreakdown.mode === "FIXED"
-                ? "flat"
-                : `${quote.codBreakdown.percentage}%${quote.codBreakdown.floorApplied ? `, minimum ${quote.codBreakdown.minAmount} applied` : ""}`}
-              )
-            </span>
-            <span className="font-mono">{quote.codSurcharge}</span>
-          </div>
         ) : null}
-
-        <div className={`${row} border-t border-gray-300 pt-2 text-base font-semibold dark:border-gray-700`}>
-          <span>Total</span>
-          <span className="font-mono">{quote.totalCharge}</span>
-        </div>
       </div>
-    </section>
+
+      {!ready ? (
+        <p className="mt-4 text-caption text-ink-muted">
+          Fill in both pincodes, the dimensions and the weight — the price
+          appears here as you type.
+        </p>
+      ) : error ? (
+        <p className="mt-4 rounded-xl border border-signal/40 bg-signal-wash px-3 py-2.5 text-caption text-ink-bright">
+          {error}
+        </p>
+      ) : !quote ? (
+        <p className="mt-4 text-caption text-ink-muted">
+          {stale ? "Re-pricing…" : "Pricing…"}
+        </p>
+      ) : (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag>{quote.pickupZone.code}</Tag>
+            <span className="text-ink-muted">→</span>
+            <Tag>{quote.dropZone.code}</Tag>
+            <Tag active>{quote.scope}</Tag>
+          </div>
+          <p className="mt-2 text-[0.6875rem] text-ink-muted">
+            {quote.pickupZone.resolvedArea.name} →{" "}
+            {quote.dropZone.resolvedArea.name}
+          </p>
+
+          <div className="mt-4 border-t border-ink-line pt-3 text-caption">
+            <div className={line}>
+              <span className="text-ink-muted">Actual</span>
+              <span className="font-mono text-ink-bright">
+                {quote.actualWeight} kg
+              </span>
+            </div>
+            <div className={line}>
+              <span className="text-ink-muted">
+                Volumetric ÷{quote.volumetricDivisor}
+              </span>
+              <span className="font-mono text-ink-bright">
+                {quote.volumetricWeight} kg
+              </span>
+            </div>
+            <div className={line}>
+              <span className="text-ink-bright">
+                Chargeable
+                <span className="ml-1.5 text-[0.6875rem] text-ink-muted">
+                  ({quote.chargeableWeightBasis.toLowerCase()})
+                </span>
+              </span>
+              <span className="font-mono text-ink-bright">
+                {quote.chargeableWeight} kg
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 border-t border-ink-line pt-3 text-caption">
+            <div className={line}>
+              <span className="text-ink-muted">
+                Base (first {quote.freightBreakdown.baseWeightKg} kg)
+              </span>
+              <span className="font-mono text-ink-bright">
+                {quote.freightBreakdown.baseRate}
+              </span>
+            </div>
+            <div className={line}>
+              <span className="text-ink-muted">
+                {quote.freightBreakdown.billedExcessKg} kg ×{" "}
+                {quote.freightBreakdown.perKgRate}
+              </span>
+              <span className="font-mono text-ink-bright">
+                {quote.freightBreakdown.excessCharge}
+              </span>
+            </div>
+            <div className={line}>
+              <span className="text-ink-bright">Freight</span>
+              <span className="font-mono text-ink-bright">
+                {quote.baseCharge}
+              </span>
+            </div>
+            {quote.codBreakdown ? (
+              <div className={line}>
+                <span className="text-ink-muted">
+                  COD{" "}
+                  {quote.codBreakdown.mode === "PERCENTAGE"
+                    ? `${quote.codBreakdown.percentage}%${quote.codBreakdown.floorApplied ? " (min)" : ""}`
+                    : "flat"}
+                </span>
+                <span className="font-mono text-ink-bright">
+                  {quote.codSurcharge}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-ink-line pt-4">
+            <span className="text-body text-ink-bright">Total</span>
+            <span className="font-mono text-title text-signal">
+              {quote.totalCharge}
+            </span>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }

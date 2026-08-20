@@ -173,17 +173,17 @@ export function RateCardManager({
       {notice ? <Notice kind="success">{notice}</Notice> : null}
 
       {gaps.length > 0 ? (
-        <div className="rounded border border-amber-300 p-4 dark:border-amber-900">
+        <div className="rounded border border-signal/40 p-4">
           <Notice kind="warn">
             {gaps.length} zone pair/order-type combination(s) have no usable
             rate card. An order matching one of these cannot be priced.
           </Notice>
 
-          <ul className="mt-3 max-h-40 overflow-y-auto text-sm text-gray-700 dark:text-gray-300">
+          <ul className="mt-3 max-h-40 overflow-y-auto text-caption text-ink-bright">
             {gaps.map((gap) => (
               <li
                 key={`${gap.orderType}-${gap.fromZone.id}-${gap.toZone.id}`}
-                className="font-mono text-xs"
+                className="font-mono text-caption"
               >
                 {gap.orderType} · {gap.scope} · {gap.fromZone.code} →{" "}
                 {gap.toZone.code}
@@ -195,7 +195,7 @@ export function RateCardManager({
           {missingOnly.length > 0 ? (
             <form
               onSubmit={fillGaps}
-              className="mt-4 flex flex-wrap items-end gap-3 border-t border-amber-200 pt-4 dark:border-amber-900"
+              className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-line pt-4"
             >
               <Field label="Base rate" hint={`Applied to all ${missingOnly.length} missing`}>
                 <input
@@ -237,7 +237,7 @@ export function RateCardManager({
 
       <form
         onSubmit={createCard}
-        className="flex flex-wrap items-end gap-3 rounded border border-gray-200 p-4 dark:border-gray-800"
+        className="flex flex-wrap items-end gap-3 rounded-2xl border border-ink-line bg-ink-soft p-5"
       >
         <Field label="Order type">
           <select
@@ -317,9 +317,9 @@ export function RateCardManager({
       >
         {rateCards.map((card) => (
           <tr key={card.id} className={rowClass}>
-            <td className={`${cellClass} font-mono text-xs`}>{card.orderType}</td>
-            <td className={`${cellClass} font-mono text-xs`}>{card.scope}</td>
-            <td className={`${cellClass} font-mono text-xs`}>
+            <td className={`${cellClass} font-mono text-caption`}>{card.orderType}</td>
+            <td className={`${cellClass} font-mono text-caption`}>{card.scope}</td>
+            <td className={`${cellClass} font-mono text-caption`}>
               {card.fromZone.code} → {card.toZone.code}
             </td>
             <td className={cellClass}>{card.baseRate}</td>
@@ -344,7 +344,7 @@ export function RateCardManager({
         ))}
         {rateCards.length === 0 ? (
           <tr>
-            <td colSpan={8} className="py-4 text-gray-500 dark:text-gray-400">
+            <td colSpan={8} className="py-4 text-ink-muted">
               No rate cards yet.
             </td>
           </tr>

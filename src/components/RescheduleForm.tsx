@@ -73,14 +73,14 @@ export function RescheduleForm({
   }
 
   return (
-    <section className="rounded border border-amber-300 p-4 dark:border-amber-900">
-      <h2 className="text-sm font-medium">Delivery failed</h2>
+    <section className="rounded border border-signal/40 p-4">
+      <h2 className="text-caption font-medium">Delivery failed</h2>
       {failureReason ? (
-        <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+        <p className="mt-1 text-caption text-ink-bright">
           Reason given: {failureReason}
         </p>
       ) : null}
-      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+      <p className="mt-1 text-caption text-ink-muted">
         Pick a new date and we will try again. An agent is assigned fresh, so it
         may not be the same person.
       </p>
