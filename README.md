@@ -6,21 +6,147 @@ assigning agents, and notifying customers at every status change.
 Next.js 14 (App Router) · TypeScript · Tailwind CSS · Prisma 6 · PostgreSQL ·
 Zod · bcryptjs · jose.
 
+## Contents
+
+- [Getting started](#getting-started) · [Environment variables](#environment-variables)
+- [Database schema](#database-schema) · [Configuration model](#configuration-model)
+- [Rate engine](#rate-engine) — the charge calculation
+- [API reference](#api-conventions) — [auth](#auth-api), [orders](#order-api), [admin](#admin-api), [lifecycle](#lifecycle-api)
+- [Status lifecycle](#status-lifecycle) · [Orders and assignment](#orders-and-assignment)
+- [Notifications](#notifications-1) · [Design system](#design-system) · [Motion](#motion)
+- [System design write-up](SYSTEM_DESIGN.md)
+
+---
+
 ## Getting started
 
+### Prerequisites
+
+| Requirement | Notes |
+| ----------- | ----- |
+| Node.js 18.17+ | Developed on Node 22/25; Next 14 needs ≥ 18.17 |
+| A PostgreSQL database | Neon's free tier works; any Postgres 13+ does |
+| A Resend API key | Optional — without it email is logged, not sent |
+
+### Install and run
+
 ```bash
-npm install
-cp .env.example .env      # then fill in DATABASE_URL, DIRECT_URL, JWT_SECRET
-npm run db:migrate        # apply migrations
-npm run db:seed           # seed zones, rate cards, one admin, two agents
-npm run dev
+git clone https://github.com/devaskswhy/Last-Mile_DeliveryTracker-D7V-.git
+cd Last-Mile_DeliveryTracker-D7V-
+
+npm install                # postinstall runs `prisma generate`
+cp .env.example .env       # then fill it in — see the table below
+
+npm run db:migrate         # apply migrations (uses DIRECT_URL)
+npm run db:seed            # zones, areas, rate cards, 1 admin, 2 agents
+npm run dev                # http://localhost:3000
 ```
 
-Generate a `JWT_SECRET` with:
+The seed **requires** `SEED_ADMIN_PASSWORD` and `SEED_AGENT_PASSWORD` and fails
+loudly without them — there are no fallback passwords, so a working credential
+can never sit in the repository. Re-running the seed rewrites those accounts'
+password hashes, which is also how you rotate them.
+
+### Commands
+
+```bash
+npm run dev          # dev server
+npm run build        # production build
+npm start            # serve the production build
+npm test             # Vitest — 107 unit tests, no database needed
+npm run test:watch   # Vitest in watch mode
+npm run db:migrate   # prisma migrate dev
+npm run db:deploy    # prisma migrate deploy (CI / production)
+npm run db:seed      # idempotent seed
+npm run db:studio    # Prisma Studio
+```
+
+### Environment variables
+
+Every variable in `.env.example`. `.env` is gitignored and must never be
+committed.
+
+| Variable | Required | Purpose |
+| -------- | :------: | ------- |
+| `DATABASE_URL` | **yes** | Pooled Postgres connection, used at runtime. On Neon this is the host **with** `-pooler`. |
+| `DIRECT_URL` | **yes** | Unpooled connection, used by Prisma Migrate. Same host **without** `-pooler` — migrations need a session-mode connection PgBouncer cannot give. |
+| `JWT_SECRET` | **yes** | HS256 signing key for session tokens. Minimum 32 characters; the app refuses to boot below that. |
+| `JWT_EXPIRES_IN` | no | Session lifetime in seconds. Default `604800` (7 days). |
+| `AUTH_COOKIE_NAME` | no | Session cookie name. Default `lm_session`. |
+| `SEED_ADMIN_EMAIL` | no | Default `admin@lastmile.local`. |
+| `SEED_ADMIN_PASSWORD` | seed only | Required by `npm run db:seed`. No fallback. |
+| `SEED_AGENT_PASSWORD` | seed only | Required by `npm run db:seed`. No fallback. |
+| `RESEND_API_KEY` | no | Enables real email. Without it the channel reports itself unconfigured and logs instead of sending. |
+| `EMAIL_FROM_ADDRESS` | no | Sender. Use `onboarding@resend.dev` until you verify a domain. |
+| `EMAIL_FROM_NAME` | no | Sender display name. |
+| `NEXT_PUBLIC_APP_URL` | no | Base URL for tracking links in emails. **Set this in production** or emailed links point at localhost. |
+
+Generate a secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
+
+---
+
+## Database schema
+
+`prisma/schema.prisma` is the single source of truth. Tables are `snake_case`
+via `@@map`; models stay `PascalCase` and fields `camelCase`. Money and weights
+are `Decimal`, never `Float`.
+
+| Model | Purpose |
+| ----- | ------- |
+| **User** | One row per person. `role` is `CUSTOMER \| AGENT \| ADMIN`. `isActive` allows deactivation without deletion, so an ex-agent's orders keep their actor references. |
+| **Zone** | The unit rate cards are priced between. Unique `code` (`NORTH`) used throughout the rate tables. |
+| **Area** | Maps a `pincode` to exactly one Zone. This is how an address finds its zone. Unique on `(zoneId, name)`, indexed on `pincode`. |
+| **RateCard** | Pricing for one `(orderType, scope, fromZone, toZone)` — also its unique key. Carries `baseRate` covering the first `baseWeightKg`, plus `perKgRate` beyond it. |
+| **CodSurchargeConfig** | One row per order type (`orderType` is unique). `FIXED` amount or `PERCENTAGE` of freight with an optional `minAmount` floor. |
+| **Agent** | Delivery-agent profile, 1-1 with a User. Holds `availability`, `currentZoneId`, and `currentLat/Lng` for a future dispatcher. |
+| **Order** | The shipment. Carries both addresses, dimensions, all three weights, the resolved zones, and a **snapshot** of every charge plus the `rateCardId` used — so a later rate change never rewrites history. |
+| **DeliveryAttempt** | One scheduled attempt. Attempt 1 opens with the order; a failure closes it with a reason and rescheduling opens the next. Mutable, because it records the *plan*. |
+| **OrderStatusHistory** | **Append-only.** Every status change with actor, role, timestamp and note. A Postgres trigger rejects UPDATE, DELETE and TRUNCATE. |
+
+Four migrations, applied in order:
+
+1. `init` — all tables and enums
+2. `order_status_history_append_only` — the audit trigger
+3. `config_integrity_constraints` — CHECK constraints on rate cards and COD rows
+4. `delivery_attempts` — the attempt table
+
+---
+
+## API conventions
+
+Every route handler answers in one envelope, so clients parse one shape:
+
+```jsonc
+// success
+{ "ok": true, "data": { /* ... */ } }
+
+// failure
+{ "ok": false, "error": { "message": "…", "details": { /* optional */ } } }
+```
+
+Validation failures return `422` with per-field messages:
+
+```jsonc
+{ "ok": false, "error": { "message": "Validation failed",
+  "details": { "email": ["Enter a valid email address"] } } }
+```
+
+**Auth** is an HS256 JWT in an httpOnly, SameSite=Lax cookie. `src/middleware.ts`
+gates routes by role on the Edge runtime; every handler then re-verifies the
+cookie through `src/lib/auth/guard.ts` rather than trusting the `x-user-id`
+header middleware forwards. Anything sensitive uses `requireActiveUser()`, which
+re-reads the account — a JWT keeps asserting its role until it expires.
+
+| Status | Meaning |
+| ------ | ------- |
+| `401` | Not signed in, or the account is no longer active |
+| `403` | Signed in, wrong role — or an agent touching another agent's order |
+| `409` | Conflict: stale quote, duplicate, closed order, no agent available |
+| `422` | Validation failed, or a domain rule rejected the request |
 
 ---
 
@@ -251,6 +377,136 @@ curl -b jar.txt http://localhost:3000/api/me
 Sessions are HS256 JWTs in an httpOnly, SameSite=Lax cookie. `src/middleware.ts`
 gates routes by role on the Edge runtime; route handlers re-verify through
 `src/lib/auth/guard.ts`.
+
+### Request and response shapes
+
+<details>
+<summary><code>POST /api/auth/register</code> — public, creates a CUSTOMER</summary>
+
+```jsonc
+// request
+{ "name": "Priya Nair", "email": "priya@example.com",
+  "password": "at-least-8-chars", "phone": "+91 98765 43210" }   // phone optional
+
+// 201 — sets the session cookie
+{ "ok": true, "data": { "user": { "id": "…", "email": "…", "name": "…", "role": "CUSTOMER" } } }
+// 409 if the email is taken
+```
+</details>
+
+<details>
+<summary><code>POST /api/orders/quote</code> — any signed-in role, read-only</summary>
+
+```jsonc
+// request
+{ "pickupPincode": "110085", "dropPincode": "110017",
+  "lengthCm": "40", "breadthCm": "30", "heightCm": "25",
+  "actualWeightKg": "4", "orderType": "B2C", "paymentType": "COD" }
+
+// 200 — every figure the charge was built from
+{ "ok": true, "data": { "quote": {
+  "pickupZone": { "id": "…", "code": "NORTH", "name": "North Zone",
+                  "resolvedArea": { "id": "…", "name": "Rohini", "pincode": "110085" } },
+  "dropZone":   { "code": "SOUTH", "…": "…" },
+  "scope": "INTER",
+  "actualWeight": "4.000", "volumetricWeight": "6.000",
+  "chargeableWeight": "6.000", "chargeableWeightBasis": "VOLUMETRIC",
+  "volumetricDivisor": 5000,
+  "rateCardUsed": { "id": "…", "baseRate": "70", "baseWeightKg": "1", "perKgRate": "25" },
+  "freightBreakdown": { "baseRate": "70.00", "baseWeightKg": "1.000",
+                        "excessWeightKg": "5.000", "billedExcessKg": 5,
+                        "perKgRate": "25.00", "excessCharge": "125.00" },
+  "codBreakdown": { "mode": "FIXED", "amount": "30.00" },
+  "baseCharge": "195.00", "codSurcharge": "30.00", "totalCharge": "225.00"
+} } }
+```
+
+All money and weight values are **decimal strings**, never JSON numbers.
+Errors carry a stable `code` — see the [failure table](#failure-is-typed-never-a-default).
+</details>
+
+<details>
+<summary><code>POST /api/orders</code> — CUSTOMER (own) or ADMIN (on behalf)</summary>
+
+```jsonc
+// request
+{ "customerId": "…",                       // ADMIN only; ignored for a CUSTOMER
+  "pickup": { "contactName": "Sender Name", "phone": "+91 90000 00001",
+              "addressLine1": "12 Test Street", "addressLine2": null,
+              "city": "Delhi", "pincode": "110085" },
+  "drop":   { "…": "same shape" },
+  "lengthCm": "40", "breadthCm": "30", "heightCm": "25", "actualWeightKg": "4",
+  "orderType": "B2C", "paymentType": "COD",
+  "codAmount": "1500.00",                  // required iff paymentType is COD
+  "notes": "optional",
+  "acknowledgedTotal": "225.00" }          // REQUIRED — the total you were shown
+
+// 201
+{ "ok": true, "data": { "orderId": "…", "orderNumber": "LM-20260820-5ZYAXS",
+  "quote": { /* as above */ },
+  "assignment": { "assigned": true, "agentName": "Asha Rane", "employeeCode": "AGT-001" } } }
+// or  "assignment": { "assigned": false, "reason": "No agent is available in the pickup zone" }
+
+// 409 QUOTE_STALE — the price changed; the fresh quote is attached
+```
+
+`acknowledgedTotal` is never used *as* the price. The server recomputes with the
+same `calculateRate()` the quote endpoint uses and refuses on any disagreement,
+so a tampered payload cannot set its own total.
+</details>
+
+<details>
+<summary><code>POST /api/agent/orders/[id]/status</code> — AGENT, own orders only</summary>
+
+```jsonc
+// request
+{ "status": "FAILED", "note": "Nobody at the address; building locked" }
+
+// 200
+{ "ok": true, "data": { "orderId": "…", "orderNumber": "…",
+  "previousStatus": "OUT_FOR_DELIVERY", "status": "FAILED",
+  "nextStatuses": [], "notified": true } }
+
+// 403 NOT_YOUR_ORDER · 422 INVALID_TRANSITION · 409 SAME_STATUS / ORDER_CLOSED
+```
+</details>
+
+<details>
+<summary><code>GET /api/orders/[id]/tracking</code> — owner, assigned agent, or ADMIN</summary>
+
+```jsonc
+{ "ok": true, "data": { "tracking": {
+  "orderNumber": "…", "currentStatus": "ASSIGNED",
+  "isClosed": false, "canReschedule": false,
+  "route": { "pickup": { "city": "Delhi", "pincode": "110085", "zone": "NORTH" },
+             "drop":   { "…": "…" } },
+  "attempts": [ { "attemptNumber": 1, "status": "FAILED",
+                  "scheduledFor": null, "failureReason": "Nobody home",
+                  "agent": { "name": "Asha Rane", "employeeCode": "AGT-001" } } ],
+  "timeline": [ { "id": "…", "fromStatus": null, "status": "CREATED",
+                  "note": "Created by the customer", "at": "2026-08-20T05:21:18.887Z",
+                  "actor": { "name": "…", "role": "CUSTOMER" } } ]
+} } }
+```
+
+`timeline` is every `order_status_history` row in order — the whole trail, not a
+summary.
+</details>
+
+<details>
+<summary><code>PATCH /api/agent/availability</code> — the signed-in agent's own status</summary>
+
+```jsonc
+// request
+{ "availability": "BUSY" }        // AVAILABLE | BUSY | OFFLINE
+
+// 200 — the active count is returned so the UI can say what this did not do
+{ "ok": true, "data": { "availability": "BUSY", "activeOrderCount": 6 } }
+```
+
+Availability governs auto-assignment only. Going off shift never hands back work
+already assigned.
+</details>
 
 ---
 

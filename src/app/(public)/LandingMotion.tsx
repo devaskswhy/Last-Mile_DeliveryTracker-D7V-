@@ -71,18 +71,20 @@ export function LandingMotion({ children }: { children: ReactNode }) {
         clearProps: "willChange",
       });
 
+      // This paragraph is the page's largest contentful element, so its delay
+      // is directly the LCP figure. Kept short deliberately.
       gsap.to("[data-hero-meta]", {
         autoAlpha: 1,
         y: 0,
         duration: DURATION.base,
-        delay: 0.35,
+        delay: 0.12,
       });
     };
 
     window.addEventListener("lm:preloader-done", playHero, { once: true });
     // Safety net: if the preloader never signals (soft navigation, or it was
     // not rendered) the hero must still arrive rather than stay hidden.
-    const heroFallback = window.setTimeout(playHero, 2600);
+    const heroFallback = window.setTimeout(playHero, 2200);
 
     media.add(
       {

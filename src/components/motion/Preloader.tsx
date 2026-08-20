@@ -15,18 +15,54 @@ import { getLenis } from "./SmoothScroll";
  * than as loading — so the counter is paced to a floor regardless of how fast
  * the page is actually ready. It is honest about real waits too: if assets take
  * longer than the floor, it holds until they finish instead of sitting at 100%.
+ *
+ * ## Why the floor is 900ms and the curtain runs once a session
+ *
+ * A preloader is, by construction, deliberate delay in front of content, and
+ * Largest Contentful Paint measures exactly that. Measured on a throttled
+ * mobile profile: the same shell without a curtain (`/login`) scores 100 with
+ * an LCP of 1.7s; the landing page with a 2s curtain scored 93 with an LCP of
+ * 2.9s. The stack is not the cost — the curtain is, and about a second of it.
+ *
+ * So the curtain earns its keep rather than being removed. It is short enough
+ * to stay inside the LCP budget, it starts the page moving as it *begins* to
+ * lift rather than after it has gone, and it shows once per session — a
+ * returning visitor should not sit through the same beat on every navigation
+ * back to the landing page.
  */
-const MINIMUM_MS = 2000;
+const MINIMUM_MS = 900;
+
+/** Marks the curtain as already spent for this browsing session. */
+const SEEN_KEY = "lm:preloader-seen";
 
 export function Preloader() {
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
+  /** null until the session check runs, so the server and client agree. */
+  const [skip, setSkip] = useState<boolean | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const wipe = useRef<HTMLDivElement>(null);
   const counter = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     registerMotion();
+
+    // Read in an effect, never during render: sessionStorage does not exist on
+    // the server, and branching on it while rendering would mismatch hydration.
+    let alreadySeen = false;
+    try {
+      alreadySeen = window.sessionStorage.getItem(SEEN_KEY) === "1";
+      window.sessionStorage.setItem(SEEN_KEY, "1");
+    } catch {
+      // Private mode or storage disabled — show the curtain, it is not critical.
+    }
+
+    if (alreadySeen) {
+      setSkip(true);
+      window.dispatchEvent(new CustomEvent("lm:preloader-done"));
+      return;
+    }
+    setSkip(false);
 
     // Nothing should scroll while the curtain is up — including a stray
     // keyboard or trackpad gesture behind it.
@@ -74,17 +110,21 @@ export function Preloader() {
   }, []);
 
   useEffect(() => {
-    if (!done) return;
+    if (!done || skip) return;
 
+    /** Lets the page begin its entrance. Fired as the curtain starts to lift. */
+    const cue = () =>
+      window.dispatchEvent(new CustomEvent("lm:preloader-done"));
+
+    /** Unlocks scrolling. Held until the curtain is actually gone. */
     const release = () => {
       document.body.style.overflow = "";
       getLenis()?.start();
-      // Tell the page it may run its entrance animations now.
-      window.dispatchEvent(new CustomEvent("lm:preloader-done"));
     };
 
     if (prefersReducedMotion()) {
       gsap.set(root.current, { autoAlpha: 0 });
+      cue();
       release();
       return;
     }
@@ -96,7 +136,7 @@ export function Preloader() {
       .to(counter.current, {
         autoAlpha: 0,
         y: -24,
-        duration: DURATION.fast,
+        duration: 0.2,
         ease: EASE_GSAP,
       })
       // The wipe is a scaleY on a transform origin — not a height animation.
@@ -109,6 +149,8 @@ export function Preloader() {
           transformOrigin: "top center",
           duration: DURATION.slow,
           ease: EASE_GSAP,
+          // The page starts moving with the curtain, not after it.
+          onStart: cue,
         },
         "-=0.1",
       )
@@ -117,7 +159,9 @@ export function Preloader() {
     return () => {
       timeline.kill();
     };
-  }, [done]);
+  }, [done, skip]);
+
+  if (skip) return null;
 
   return (
     <div
