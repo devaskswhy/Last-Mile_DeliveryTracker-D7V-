@@ -1,70 +1,111 @@
+import { ResendEmailChannel } from "./channels/email-resend";
+import { SmsStubChannel } from "./channels/sms-stub";
+import { renderMessage } from "./templates";
 import type {
-  Notifier,
-  OrderNotification,
-  NotificationResult,
+  ChannelResult,
+  NotifiableOrder,
+  NotificationChannel,
+  NotificationEvent,
+  NotificationOutcome,
 } from "./types";
 
 export type * from "./types";
+export { renderMessage, describeStatus, trackingUrl } from "./templates";
 
 /**
- * Phase 5 adapter: records the notification and reports it as undelivered.
+ * The notification service.
  *
- * It returns `delivered: false` rather than pretending, so nothing downstream
- * can mistake "wired up" for "the customer was told". Phase 6 replaces this
- * with a provider-backed implementation of the same interface.
+ * Order code calls `notify(order, event)`. It does not know which channels
+ * exist, whether any is configured, or whether they succeeded — adding a
+ * channel is a new `NotificationChannel` in the list below and nothing else.
  */
-export class ConsoleNotifier implements Notifier {
-  async send(notification: OrderNotification): Promise<NotificationResult> {
-    const { type, recipient, orderNumber, status, message } = notification;
 
-    console.info(
-      `[notify:${type}] ${orderNumber} → ${status} → ${recipient.email}` +
-        (message ? ` — ${message}` : ""),
+let registry: NotificationChannel[] = [
+  new ResendEmailChannel(),
+  new SmsStubChannel(),
+];
+
+export function channels(): readonly NotificationChannel[] {
+  return registry;
+}
+
+/** Replaces the channel list. Used by tests and by any future wiring. */
+export function setChannels(next: NotificationChannel[]): void {
+  registry = next;
+}
+
+/**
+ * Delivers one event over every registered channel.
+ *
+ * **This function never throws.** A notification is a side effect of an order
+ * operation, not part of it: by the time it runs the status change is already
+ * committed, so letting a provider outage surface as a failed request would
+ * make an agent retry a transition that already succeeded and put a duplicate
+ * entry in the audit trail for one real event.
+ *
+ * Channels run in parallel and are settled independently, so a slow SMS
+ * provider cannot delay an email that is already sent, and one channel failing
+ * has no effect on the others.
+ */
+export async function notify(
+  order: NotifiableOrder,
+  event: NotificationEvent,
+): Promise<NotificationOutcome> {
+  const outcome: NotificationOutcome = {
+    orderNumber: order.orderNumber,
+    event: event.type,
+    results: [],
+  };
+
+  try {
+    const message = renderMessage(order, event);
+
+    const settled = await Promise.allSettled(
+      registry.map(async (channel): Promise<ChannelResult> => {
+        if (!channel.isConfigured()) {
+          // The summary line below reports this, so it is visible without
+          // being logged twice.
+          return {
+            channel: channel.name,
+            delivered: false,
+            reference: null,
+            detail: `${channel.name} channel is not configured`,
+          };
+        }
+        return channel.send(order, event, message);
+      }),
     );
 
-    return {
-      delivered: false,
-      reference: null,
-      detail: "No delivery channel configured yet (Phase 6)",
-    };
-  }
-}
+    outcome.results = settled.map((result, index) =>
+      result.status === "fulfilled"
+        ? result.value
+        : {
+            channel: registry[index].name,
+            delivered: false,
+            reference: null,
+            detail: `Channel threw: ${
+              result.reason instanceof Error
+                ? result.reason.message
+                : "unknown error"
+            }`,
+          },
+    );
 
-let notifier: Notifier = new ConsoleNotifier();
-
-export function getNotifier(): Notifier {
-  return notifier;
-}
-
-/** Swaps the adapter — used by Phase 6 wiring and by tests. */
-export function setNotifier(next: Notifier): void {
-  notifier = next;
-}
-
-/**
- * Sends without ever failing the caller.
- *
- * Notification is a side effect of a status change, not part of it. The
- * transition is already committed by the time this runs, so a provider outage
- * must not surface as a failed status update — the agent would retry a
- * transition that already succeeded, and the audit trail would gain a
- * duplicate entry for one real event.
- */
-export async function notifySafely(
-  notification: OrderNotification,
-): Promise<NotificationResult> {
-  try {
-    return await getNotifier().send(notification);
+    for (const result of outcome.results) {
+      const state = result.delivered ? "sent" : "not sent";
+      console.info(
+        `[notify:${event.type}] ${order.orderNumber} → ${order.status} · ${result.channel} ${state} — ${result.detail}`,
+      );
+    }
   } catch (error) {
-    console.error("[notify] delivery failed", {
-      type: notification.type,
-      orderNumber: notification.orderNumber,
-      error,
-    });
-    return {
-      delivered: false,
-      reference: null,
-      detail: error instanceof Error ? error.message : "Unknown error",
-    };
+    // Rendering itself failed. Still not the caller's problem.
+    console.error(`[notify:${event.type}] ${order.orderNumber} failed`, error);
   }
+
+  return outcome;
+}
+
+/** True when at least one channel actually delivered. Never assumed. */
+export function wasDelivered(outcome: NotificationOutcome): boolean {
+  return outcome.results.some((result) => result.delivered);
 }

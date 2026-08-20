@@ -6,8 +6,7 @@ import {
   canTransition,
   isClosedStatus,
 } from "@/lib/domain/order-status";
-import { notifySafely } from "@/lib/notifications";
-import type { OrderNotification } from "@/lib/notifications";
+import { notify, wasDelivered } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 
 import { appendStatusHistory } from "./history";
@@ -80,8 +79,16 @@ export async function updateOrderStatus(
         orderNumber: true,
         status: true,
         assignedAgentId: true,
-        assignedAgent: { select: { userId: true } },
-        customer: { select: { id: true, name: true, email: true } },
+        assignedAgent: {
+          select: {
+            userId: true,
+            employeeCode: true,
+            user: { select: { name: true } },
+          },
+        },
+        customer: {
+          select: { id: true, name: true, email: true, phone: true },
+        },
       },
     });
 
@@ -225,22 +232,23 @@ export async function updateOrderStatus(
   // --- Notify, outside the transaction ------------------------------------
   // The change is committed by this point. A notification failure must not
   // roll it back, or an agent would retry a transition that already happened.
-  const notification: OrderNotification = {
-    type: request.status === "FAILED" ? "DELIVERY_FAILED" : "ORDER_STATUS_CHANGED",
-    recipient: {
-      userId: outcome.order.customer.id,
-      name: outcome.order.customer.name,
-      email: outcome.order.customer.email,
+  const result = await notify(
+    {
+      id: outcome.order.id,
+      orderNumber: outcome.order.orderNumber,
+      status: request.status,
+      customer: outcome.order.customer,
+      agent: outcome.order.assignedAgent
+        ? {
+            name: outcome.order.assignedAgent.user.name,
+            employeeCode: outcome.order.assignedAgent.employeeCode,
+          }
+        : null,
     },
-    orderId: outcome.order.id,
-    orderNumber: outcome.order.orderNumber,
-    status: request.status,
-    previousStatus: outcome.previousStatus,
-    message: request.note ?? null,
-    occurredAt: outcome.occurredAt,
-  };
-
-  const result = await notifySafely(notification);
+    request.status === "FAILED"
+      ? { type: "DELIVERY_FAILED", reason: request.note ?? null }
+      : { type: "STATUS_CHANGED", from: outcome.previousStatus },
+  );
 
   return {
     orderId: outcome.order.id,
@@ -248,6 +256,6 @@ export async function updateOrderStatus(
     previousStatus: outcome.previousStatus,
     status: request.status,
     nextStatuses: agentNextStatuses(request.status),
-    notified: result.delivered,
+    notified: wasDelivered(result),
   };
 }

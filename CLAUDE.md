@@ -33,11 +33,17 @@ Two further rules that the database itself enforces:
    describe the shape of the domain (`B2B` / `B2C`, `INTRA` / `INTER`), which is
    structural, and each is guarded by a `satisfies` check against the Prisma
    enum so it cannot drift.
-4. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
+4. **SMS is a stub and must never be described as working.** It logs the
+   message it would send and returns `delivered: false`. Do not change it to
+   report success, and do not let any UI say "SMS sent" — the point is that a
+   silent non-delivery is worse than a visible one. Email via Resend is real,
+   but the sandbox sender only reaches the Resend account owner until a domain
+   is verified.
+5. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
    A failed delivery is rescheduled into a new attempt, so treating it as
    terminal would block the reassignment that reschedule depends on. Use
    `isClosedStatus()`, never a hand-rolled list.
-5. **A price is never accepted from a client.** `POST /api/orders` recomputes
+6. **A price is never accepted from a client.** `POST /api/orders` recomputes
    the charge with the same `calculateRate()` the quote endpoint uses. The
    client sends `acknowledgedTotal` only so the server can *check* it; a
    mismatch is refused with `QUOTE_STALE`. Never persist a charge that arrived
@@ -115,7 +121,10 @@ src/
       errors.ts          RateEngineError + stable error codes
       config-source.ts   loadRateConfig() — the only part that reads Prisma
       engine.test.ts     Vitest; fixtures only, no database
-    notifications/     Notifier interface + ConsoleNotifier (Phase 6 swaps it)
+    notifications/
+      index.ts           notify(order, event) — fans out, NEVER throws
+      templates.ts       Per-event subject/html/text/sms, HTML-escaped
+      channels/          email-resend.ts (live) · sms-stub.ts (NOT SENT)
     admin/
       handler.ts         adminRoute() — ADMIN guard + DB error mapping
       config-health.ts   Rate-card coverage gaps, pincode conflicts

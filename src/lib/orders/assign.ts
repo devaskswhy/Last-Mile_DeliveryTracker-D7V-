@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/auth/roles";
 import { isClosedStatus } from "@/lib/domain/order-status";
+import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 
 import { ASSIGNMENT_STRATEGY, chooseAgentForZone } from "./assignment";
@@ -60,7 +61,7 @@ export async function assignOrder(
   request: AssignRequest,
   actor: { id: string; role: Role },
 ): Promise<AssignResult> {
-  return prisma.$transaction(async (tx) => {
+  const { result, customer } = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
       select: {
@@ -76,6 +77,9 @@ export async function assignOrder(
             employeeCode: true,
             user: { select: { name: true } },
           },
+        },
+        customer: {
+          select: { id: true, name: true, email: true, phone: true },
         },
       },
     });
@@ -180,22 +184,43 @@ export async function assignOrder(
     });
 
     return {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      status: nextStatus,
-      agent: {
-        id: agent.id,
-        name: agent.user.name,
-        employeeCode: agent.employeeCode,
+      customer: order.customer,
+      result: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: nextStatus,
+        agent: {
+          id: agent.id,
+          name: agent.user.name,
+          employeeCode: agent.employeeCode,
+        },
+        previousAgent: previous
+          ? {
+              id: previous.id,
+              name: previous.user.name,
+              employeeCode: previous.employeeCode,
+            }
+          : null,
+        mode: request.mode,
       },
-      previousAgent: previous
-        ? {
-            id: previous.id,
-            name: previous.user.name,
-            employeeCode: previous.employeeCode,
-          }
-        : null,
-      mode: request.mode,
     };
   });
+
+  // The customer is told who is bringing their parcel, after the commit and
+  // without any ability to fail it.
+  await notify(
+    {
+      id: result.orderId,
+      orderNumber: result.orderNumber,
+      status: result.status,
+      customer,
+      agent: { name: result.agent.name, employeeCode: result.agent.employeeCode },
+    },
+    {
+      type: "ORDER_REASSIGNED",
+      previousAgent: result.previousAgent?.name ?? null,
+    },
+  );
+
+  return result;
 }

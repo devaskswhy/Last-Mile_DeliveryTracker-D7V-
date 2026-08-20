@@ -490,6 +490,112 @@ the only module that writes to the table.
 
 ---
 
+## Notifications
+
+Order code calls one function and knows nothing else:
+
+```ts
+await notify(order, { type: "DELIVERY_FAILED", reason: "Nobody home" });
+```
+
+It does not know which channels exist, whether any is configured, or whether
+they succeeded. Adding a channel is a new `NotificationChannel` in the registry
+in `src/lib/notifications/index.ts` — no edit to the order logic.
+
+### Events
+
+Every one of these fires a notification:
+
+| Event | Raised by |
+| ----- | --------- |
+| `ORDER_CREATED` | `lib/orders/create.ts` |
+| `STATUS_CHANGED` | `lib/orders/status.ts` — each lifecycle transition |
+| `DELIVERY_FAILED` | `lib/orders/status.ts` — carries the failure reason |
+| `DELIVERY_RESCHEDULED` | `lib/orders/reschedule.ts` — new date and attempt number |
+| `ORDER_REASSIGNED` | `lib/orders/assign.ts` — names the previous agent |
+
+### Email — live, via Resend
+
+Fully implemented in `channels/email-resend.ts`. Every message is templated
+HTML plus a plain-text alternative carrying the **order number, the new status,
+and a tracking link** back to `/orders/[id]`.
+
+**Resend was chosen over Nodemailer + Gmail** because it is an HTTP API: it
+needs nothing but `fetch`, so it adds **no dependency** to a project that keeps
+its package list deliberately short. Nodemailer would have meant a new package,
+SMTP connection handling, and Gmail app-password setup to do the same job.
+
+To turn it on, set `RESEND_API_KEY` in `.env`. Without it the channel reports
+itself unconfigured and the message is logged instead — the app never claims a
+send that did not happen.
+
+> **Free-tier limit worth knowing:** until you verify a domain with Resend, the
+> sandbox sender (`onboarding@resend.dev`) only delivers to the email address
+> that owns the Resend account. Mail to any other customer address is accepted
+> by the API and then dropped. Verify a domain before treating email as
+> genuinely live for real customers.
+
+Interpolated text is HTML-escaped. A failure reason is typed by an agent and a
+delivery note by a customer; both land in an email body, so unescaped
+`<img onerror=...>` in a delivery note would be script running in whatever
+renders the mail.
+
+### SMS — **not implemented. This is a stub.**
+
+`channels/sms-stub.ts` sends nothing to anybody. It logs the exact message it
+would have sent, with the phone number masked, and reports `delivered: false`.
+
+**Why there is no real provider:** Twilio's trial requires every destination
+number to be verified by its owner before it can receive anything, which is not
+a flow a delivery customer would ever complete, and the paid alternatives need a
+billing account. Wiring a provider that cannot actually reach a customer would
+be worse than not wiring one.
+
+The stub deliberately reports failure rather than success. A stub returning
+`delivered: true` would put "SMS sent" in front of an operator for a message
+that never left the process, and the first anyone would learn of it is a
+customer saying they were never told. **Nothing in the UI or API claims an SMS
+was sent.**
+
+Swapping in a real provider is one class:
+
+```ts
+export class TwilioSmsChannel implements NotificationChannel {
+  readonly name = "sms" as const;
+  isConfigured() { return Boolean(process.env.TWILIO_AUTH_TOKEN); }
+  async send(order, event, message) { /* POST to the provider */ }
+}
+```
+
+Register it in place of `SmsStubChannel` in `channels()`. Nothing else changes.
+
+### Failures never block an order
+
+`notify()` **cannot throw**. By the time it runs the status change is already
+committed, so letting a provider outage surface as a failed request would make
+an agent retry a transition that already succeeded — putting a duplicate entry
+in the audit trail for one real event.
+
+Three layers back that up:
+
+1. Channels run under `Promise.allSettled`, so one throwing does not affect the
+   others, and a slow channel cannot block one that already finished.
+2. A channel that throws is converted to a failed `ChannelResult`, not
+   propagated.
+3. The whole body is wrapped, so even a template bug is logged and swallowed.
+
+The Resend call is also bounded by an 8-second `AbortController` timeout, so a
+hanging provider delays an agent's response by seconds rather than indefinitely.
+
+Every outcome is logged per channel with whether it was sent and why not:
+
+```
+[notify:STATUS_CHANGED] LM-20260820-RK0D8Q → PICKED_UP · email not sent — email channel is not configured
+[notify:STATUS_CHANGED] LM-20260820-RK0D8Q → PICKED_UP · sms not sent — STUB — logged only, no SMS provider is configured
+```
+
+---
+
 ## Notes
 
 `order_status_history` is append-only and enforced by a Postgres trigger —

@@ -1,6 +1,6 @@
 import type { Role } from "@/lib/auth/roles";
 import type { OrderStatus } from "@/lib/domain/enums";
-import { notifySafely } from "@/lib/notifications";
+import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 
 import { ASSIGNMENT_STRATEGY, chooseAgentForZone } from "./assignment";
@@ -68,7 +68,9 @@ export async function rescheduleDelivery(
         customerId: true,
         pickupZoneId: true,
         assignedAgentId: true,
-        customer: { select: { id: true, name: true, email: true } },
+        customer: {
+          select: { id: true, name: true, email: true, phone: true },
+        },
       },
     });
 
@@ -162,22 +164,25 @@ export async function rescheduleDelivery(
     return { order, attemptNumber, nextStatus, agent, selection, now };
   });
 
-  await notifySafely({
-    type: "DELIVERY_RESCHEDULED",
-    recipient: {
-      userId: outcome.order.customer.id,
-      name: outcome.order.customer.name,
-      email: outcome.order.customer.email,
+  await notify(
+    {
+      id: outcome.order.id,
+      orderNumber: outcome.order.orderNumber,
+      status: outcome.nextStatus,
+      customer: outcome.order.customer,
+      agent: outcome.agent
+        ? {
+            name: outcome.agent.agentName,
+            employeeCode: outcome.agent.employeeCode,
+          }
+        : null,
     },
-    orderId: outcome.order.id,
-    orderNumber: outcome.order.orderNumber,
-    status: outcome.nextStatus,
-    previousStatus: "FAILED",
-    message: note ?? null,
-    scheduledFor,
-    attemptNumber: outcome.attemptNumber,
-    occurredAt: outcome.now,
-  });
+    {
+      type: "DELIVERY_RESCHEDULED",
+      scheduledFor,
+      attemptNumber: outcome.attemptNumber,
+    },
+  );
 
   return {
     orderId: outcome.order.id,

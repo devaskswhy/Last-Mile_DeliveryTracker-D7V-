@@ -1,51 +1,77 @@
 import type { OrderStatus } from "@/lib/domain/enums";
 
 /**
- * The notification seam.
+ * Notification contract.
  *
- * Phase 5 wires the interface and calls it at every point a customer should
- * hear something; Phase 6 supplies an adapter that actually sends email. The
- * split matters because the call sites are the hard part to get right — *when*
- * to notify, and what the message needs to know — while swapping a console
- * logger for an email provider is a single new implementation of `Notifier`.
+ * Order code calls `notify(order, event)` and knows nothing else — not which
+ * channels exist, not whether any of them is configured, not whether they
+ * succeeded. Adding SMS, push or a webhook is a new `NotificationChannel`
+ * registered in one place, with no edit to the order logic.
  */
 
-export type NotificationType =
-  /** Any forward movement: picked up, in transit, out for delivery, delivered. */
-  | "ORDER_STATUS_CHANGED"
-  /** A delivery attempt failed; the customer needs to pick a new date. */
-  | "DELIVERY_FAILED"
-  /** A new attempt has been scheduled. */
-  | "DELIVERY_RESCHEDULED";
+/** What happened. The payload carries whatever the message needs to say. */
+export type NotificationEvent =
+  | { type: "ORDER_CREATED" }
+  | { type: "STATUS_CHANGED"; from: OrderStatus | null }
+  | { type: "DELIVERY_FAILED"; reason: string | null }
+  | {
+      type: "DELIVERY_RESCHEDULED";
+      scheduledFor: Date;
+      attemptNumber: number;
+    }
+  | { type: "ORDER_REASSIGNED"; previousAgent: string | null };
 
-export interface NotificationRecipient {
-  userId: string;
-  name: string;
-  email: string;
-}
+export type NotificationEventType = NotificationEvent["type"];
 
-export interface OrderNotification {
-  type: NotificationType;
-  recipient: NotificationRecipient;
-  orderId: string;
+/** The slice of an order a message needs. Deliberately small. */
+export interface NotifiableOrder {
+  id: string;
   orderNumber: string;
   status: OrderStatus;
-  previousStatus: OrderStatus | null;
-  /** Free text shown to the customer — the failure reason, or a status note. */
-  message?: string | null;
-  /** Set on DELIVERY_RESCHEDULED. */
-  scheduledFor?: Date | null;
-  attemptNumber?: number | null;
-  occurredAt: Date;
+  customer: {
+    id: string;
+    name: string;
+    email: string;
+    /** Nullable — registration does not require one, so SMS may be skipped. */
+    phone?: string | null;
+  };
+  agent?: { name: string; employeeCode: string } | null;
 }
 
-export interface NotificationResult {
+export type ChannelName = "email" | "sms";
+
+export interface ChannelResult {
+  channel: ChannelName;
+  /** True only when a provider actually accepted the message. */
   delivered: boolean;
-  /** Identifier from the provider once one exists; null while unsent. */
+  /** Provider-side id when there is one; null otherwise. */
   reference: string | null;
-  detail?: string;
+  /** Why it was not delivered, or which provider took it. */
+  detail: string;
 }
 
-export interface Notifier {
-  send(notification: OrderNotification): Promise<NotificationResult>;
+/** A rendered message. Channels take what they need and ignore the rest. */
+export interface RenderedMessage {
+  subject: string;
+  html: string;
+  text: string;
+  /** Short form for character-limited channels. */
+  sms: string;
+}
+
+export interface NotificationChannel {
+  readonly name: ChannelName;
+  /** False when the channel has no credentials — reported, never faked. */
+  isConfigured(): boolean;
+  send(
+    order: NotifiableOrder,
+    event: NotificationEvent,
+    message: RenderedMessage,
+  ): Promise<ChannelResult>;
+}
+
+export interface NotificationOutcome {
+  orderNumber: string;
+  event: NotificationEventType;
+  results: ChannelResult[];
 }

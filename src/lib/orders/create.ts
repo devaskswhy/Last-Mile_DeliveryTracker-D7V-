@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import type { Role } from "@/lib/auth/roles";
 import type { OrderType, PaymentType } from "@/lib/domain/enums";
+import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 import {
   calculateRate,
@@ -99,7 +100,14 @@ export async function createOrder(
 ): Promise<CreateOrderResult> {
   const customer = await prisma.user.findUnique({
     where: { id: input.customerId },
-    select: { id: true, role: true, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      role: true,
+      isActive: true,
+    },
   });
 
   if (!customer) {
@@ -158,7 +166,31 @@ export async function createOrder(
   // cannot be continued.
   for (let attempt = 1; attempt <= MAX_ORDER_NUMBER_ATTEMPTS; attempt += 1) {
     try {
-      return await persist(input, actor, quote);
+      const result = await persist(input, actor, quote);
+
+      // After the commit, and never able to fail it.
+      await notify(
+        {
+          id: result.orderId,
+          orderNumber: result.orderNumber,
+          status: result.assignment.assigned ? "ASSIGNED" : "CREATED",
+          customer: {
+            id: customer.id,
+            name: customer.name,
+            email: customer.email,
+            phone: customer.phone,
+          },
+          agent: result.assignment.assigned
+            ? {
+                name: result.assignment.agentName,
+                employeeCode: result.assignment.employeeCode,
+              }
+            : null,
+        },
+        { type: "ORDER_CREATED" },
+      );
+
+      return result;
     } catch (error) {
       const isOrderNumberCollision =
         error instanceof Prisma.PrismaClientKnownRequestError &&
