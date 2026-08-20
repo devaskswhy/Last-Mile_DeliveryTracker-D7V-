@@ -84,9 +84,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  agentProfile  Agent?
-  orders        Order[]              @relation("CustomerOrders")
-  statusActions OrderStatusHistory[] @relation("StatusActor")
+  agentProfile        Agent?
+  orders              Order[]              @relation("CustomerOrders")
+  statusActions       OrderStatusHistory[] @relation("StatusActor")
+  passwordResetTokens PasswordResetToken[]
 
   @@index([role])
   @@map("users")
@@ -292,6 +293,32 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@map("orders")
+}
+
+// ---------------------------------------------------------------------------
+// Password reset
+// ---------------------------------------------------------------------------
+
+/// A single-use, time-limited token issued to a "forgot password" request.
+///
+/// The raw token is emailed and never stored -- only `tokenHash` (SHA-256 of
+/// the raw value) lives in the database, the same reasoning as storing a
+/// password hash rather than the password: a leaked row must not itself be a
+/// working credential. Lookup hashes the incoming token and compares, so
+/// possessing the emailed link is what proves the request, not knowledge of
+/// anything in this table.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 // ---------------------------------------------------------------------------

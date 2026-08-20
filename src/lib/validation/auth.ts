@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/auth/password";
 
-const email = z
+export const email = z
   .string()
   .trim()
   .toLowerCase()
@@ -10,7 +10,7 @@ const email = z
   .email("Enter a valid email address")
   .max(254);
 
-const password = z
+export const password = z
   .string()
   .min(8, "Password must be at least 8 characters")
   .refine(
@@ -37,3 +37,19 @@ export const loginSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/** "Forgot password" — request a reset link. */
+export const forgotPasswordSchema = z.object({ email });
+
+/**
+ * Consuming a reset link. `token` is opaque from the client's point of view —
+ * it is whatever arrived in the URL, validated for shape only; the real check
+ * is the database lookup by its hash.
+ */
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1, "Reset link is missing its token"),
+  password,
+});
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

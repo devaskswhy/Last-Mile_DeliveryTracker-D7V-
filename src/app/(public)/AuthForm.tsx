@@ -6,6 +6,8 @@ import { useState } from "react";
 
 import { apiRequest } from "@/components/client";
 
+import { AuthField } from "./AuthField";
+
 type Mode = "login" | "register";
 
 /**
@@ -119,7 +121,7 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
             ) : null}
 
             {isRegister ? (
-              <Field
+              <AuthField
                 label="Full name"
                 value={name}
                 onChange={setName}
@@ -128,7 +130,7 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
               />
             ) : null}
 
-            <Field
+            <AuthField
               label="Email"
               type="email"
               value={email}
@@ -138,7 +140,7 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
             />
 
             {isRegister ? (
-              <Field
+              <AuthField
                 label="Phone (optional)"
                 type="tel"
                 value={phone}
@@ -147,7 +149,7 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
               />
             ) : null}
 
-            <Field
+            <AuthField
               label="Password"
               type="password"
               value={password}
@@ -156,6 +158,15 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
               required
               hint={isRegister ? "At least 8 characters" : undefined}
             />
+
+            {!isRegister ? (
+              <Link
+                href="/forgot-password"
+                className="-mt-2 self-end text-caption text-ink-muted underline-offset-4 hover:text-signal hover:underline"
+              >
+                Forgot password?
+              </Link>
+            ) : null}
 
             <button
               type="submit"
@@ -185,31 +196,3 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  hint,
-  ...rest
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  type?: string;
-  hint?: string;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value" | "type">) {
-  return (
-    <label className="flex flex-col gap-2">
-      <span className="text-eyebrow uppercase text-ink-muted">{label}</span>
-      <input
-        {...rest}
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-ink-line bg-ink-soft px-4 py-3.5 text-body text-ink-bright outline-none transition-colors duration-fast ease-signature placeholder:text-ink-muted/60 focus:border-signal"
-      />
-      {hint ? <span className="text-caption text-ink-muted">{hint}</span> : null}
-    </label>
-  );
-}

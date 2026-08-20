@@ -154,6 +154,6 @@ describe("ResendEmailChannel", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.delivered).toBe(false);
-    expect(result.detail).toContain("no email address");
+    expect(result.detail).toContain("No recipient email address");
   });
 });

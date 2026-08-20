@@ -115,6 +115,8 @@ src/
       jwt.ts             Sign/verify session tokens — EDGE-SAFE
       roles.ts           Role union kept in parity with the Prisma enum
       password.ts        bcrypt hash/verify
+      password-reset.ts  Token generation/hashing/expiry — pure, tested
+      reset-email.ts     The password-reset email (not order-shaped notify())
       session.ts         Cookie helpers (`next/headers`) — server only
       guard.ts           requireSession / requireRole / requireActiveUser
     validation/          Zod schemas, one module per domain

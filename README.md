@@ -362,6 +362,8 @@ Deletes are refused rather than cascaded when something depends on the row:
 | POST | `/api/auth/register` | public (creates a CUSTOMER) |
 | POST | `/api/auth/login` | public |
 | POST | `/api/auth/logout` | public |
+| POST | `/api/auth/forgot-password` | public — always responds the same way |
+| POST | `/api/auth/reset-password` | public — needs a valid, unexpired, unused token |
 | GET | `/api/me` | any signed-in role |
 | GET | `/api/agent/ping` | AGENT, ADMIN |
 | GET | `/api/admin/ping` | ADMIN |
@@ -377,6 +379,49 @@ curl -b jar.txt http://localhost:3000/api/me
 Sessions are HS256 JWTs in an httpOnly, SameSite=Lax cookie. `src/middleware.ts`
 gates routes by role on the Edge runtime; route handlers re-verify through
 `src/lib/auth/guard.ts`.
+
+### Password reset
+
+`POST /api/auth/forgot-password` and `POST /api/auth/reset-password`. A link
+from Login goes to `/forgot-password`.
+
+**The forgot-password response never reveals whether the address is
+registered.** Same 200, same body, same message, whether or not an account
+exists — the same discipline `/api/auth/login`'s decoy-hash comparison already
+applies to its failure message, extended to the endpoint that starts a reset.
+Only a malformed email (a client-side input problem, not an account fact)
+returns something different, a `422`.
+
+```jsonc
+// POST /api/auth/forgot-password
+{ "email": "priya@example.com" }
+// always:
+{ "ok": true, "data": { "message": "If an account exists for that email, a reset link has been sent." } }
+```
+
+The email carries a link to `/reset-password?token=<raw token>`. Only the
+token's **SHA-256 hash** is stored — the same reasoning as storing a password
+as a bcrypt hash, not the password: a leaked table row must not itself be a
+working credential. The token is 256 bits from `crypto.randomBytes`, single-use,
+and expires after **one hour**. Requesting a new link deletes any unused token
+from an earlier request, so only the most recent link is ever live.
+
+```jsonc
+// POST /api/auth/reset-password
+{ "token": "…", "password": "at-least-8-chars" }
+// 200 { "ok": true, "data": { "reset": true } }
+// 400 — not found, expired, or already used: all three look identical
+{ "ok": false, "error": { "message": "This reset link is invalid or has expired. Request a new one." } }
+```
+
+A successful reset also deletes every other outstanding token for that
+account, so a second, unused link from an earlier request cannot be used
+after a reset has already gone through.
+
+One limitation, inherited from the session design: resetting the password does
+not invalidate a JWT already issued before the reset. Sessions are stateless —
+the same property noted for `requireActiveUser()`, where a deactivated
+account's existing token keeps asserting its old claims until it expires.
 
 ### Request and response shapes
 
