@@ -40,9 +40,18 @@ export async function apiRequest<T = unknown>(
 
   if (response.ok && body.ok) return { ok: true, data: body.data };
 
-  const details = body.error?.details;
-  const fieldErrors = details
-    ? Object.entries(details)
+  // Two shapes travel through this same field: Zod validation failures put
+  // `{ field: [messages] }` here, but a domain error (RateEngineError and
+  // friends) puts flat diagnostic metadata like `{ code, pincode, side }` --
+  // scalars, not arrays. Only the first is meant to be appended to the
+  // message; treating the second as if it were the first used to throw
+  // (`messages.join` on a string), which aborted the request silently and
+  // left callers like the quote panel stuck showing "Pricing..." forever.
+  const details = body.error?.details as Record<string, unknown> | undefined;
+  const isFieldErrors =
+    !!details && Object.values(details).every((value) => Array.isArray(value));
+  const fieldErrors = isFieldErrors
+    ? Object.entries(details as Record<string, string[]>)
         .map(([field, messages]) => `${field}: ${messages.join(", ")}`)
         .join("; ")
     : "";

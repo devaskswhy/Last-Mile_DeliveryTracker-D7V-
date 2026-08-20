@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ORDER_TYPES, PAYMENT_TYPES } from "@/lib/domain/enums";
 
-import { apiRequest } from "./client";
+import { apiRequest, type ApiResult } from "./client";
 import { Button, Field, Notice, Panel, Tag, inputClass } from "./ui";
 
 interface Quote {
@@ -140,19 +140,27 @@ export function OrderForm({
     setQuoting(true);
     setQuoteError(null);
 
-    const result = await apiRequest<{ quote: Quote }>("/api/orders/quote", {
-      method: "POST",
-      body: JSON.stringify({
-        pickupPincode: pickup.pincode,
-        dropPincode: drop.pincode,
-        lengthCm,
-        breadthCm,
-        heightCm,
-        actualWeightKg,
-        orderType,
-        paymentType,
-      }),
-    });
+    // A thrown error here must still resolve the panel to a message rather
+    // than leaving it stuck on "Pricing..." forever with no way out short of
+    // changing an input to retry.
+    let result: ApiResult<{ quote: Quote }>;
+    try {
+      result = await apiRequest<{ quote: Quote }>("/api/orders/quote", {
+        method: "POST",
+        body: JSON.stringify({
+          pickupPincode: pickup.pincode,
+          dropPincode: drop.pincode,
+          lengthCm,
+          breadthCm,
+          heightCm,
+          actualWeightKg,
+          orderType,
+          paymentType,
+        }),
+      });
+    } catch {
+      result = { ok: false, error: "Could not price this shipment" };
+    }
 
     if (id !== requestId.current) return; // A newer request has superseded this.
 
@@ -210,30 +218,39 @@ export function OrderForm({
     setBusy(true);
     setError(null);
 
-    const result = await apiRequest<{
+    type ConfirmResponse = {
       orderId: string;
       orderNumber: string;
       assignment:
         | { assigned: true; agentName: string; employeeCode: string }
         | { assigned: false; reason: string };
-    }>("/api/orders", {
-      method: "POST",
-      body: JSON.stringify({
-        ...(createdBy === "ADMIN" ? { customerId } : {}),
-        pickup: { ...pickup, addressLine2: pickup.addressLine2 || null },
-        drop: { ...drop, addressLine2: drop.addressLine2 || null },
-        lengthCm,
-        breadthCm,
-        heightCm,
-        actualWeightKg,
-        orderType,
-        paymentType,
-        ...(paymentType === "COD" ? { codAmount } : {}),
-        ...(notes ? { notes } : {}),
-        // The figure on screen, sent to be checked — never used as the price.
-        acknowledgedTotal: quote.totalCharge,
-      }),
-    });
+    };
+
+    // A thrown error here must still clear `busy` rather than leaving the
+    // Confirm button stuck in its loading state with no way out.
+    let result: ApiResult<ConfirmResponse>;
+    try {
+      result = await apiRequest<ConfirmResponse>("/api/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          ...(createdBy === "ADMIN" ? { customerId } : {}),
+          pickup: { ...pickup, addressLine2: pickup.addressLine2 || null },
+          drop: { ...drop, addressLine2: drop.addressLine2 || null },
+          lengthCm,
+          breadthCm,
+          heightCm,
+          actualWeightKg,
+          orderType,
+          paymentType,
+          ...(paymentType === "COD" ? { codAmount } : {}),
+          ...(notes ? { notes } : {}),
+          // The figure on screen, sent to be checked — never used as the price.
+          acknowledgedTotal: quote.totalCharge,
+        }),
+      });
+    } catch {
+      result = { ok: false, error: "Could not create the order" };
+    }
 
     setBusy(false);
     if (!result.ok || !result.data) {
