@@ -42,9 +42,8 @@ Two further rules that the database itself enforces:
 5. **SMS is a stub and must never be described as working.** It logs the
    message it would send and returns `delivered: false`. Do not change it to
    report success, and do not let any UI say "SMS sent" — the point is that a
-   silent non-delivery is worse than a visible one. Email via Resend is real,
-   but the sandbox sender only reaches the Resend account owner until a domain
-   is verified.
+   silent non-delivery is worse than a visible one. Email via Gmail SMTP is
+   real and reaches any recipient, not just the sending account's owner.
 6. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
    A failed delivery is rescheduled into a new attempt, so treating it as
    terminal would block the reassignment that reschedule depends on. Use
@@ -133,7 +132,7 @@ src/
     notifications/
       index.ts           notify(order, event) — fans out, NEVER throws
       templates.ts       Per-event subject/html/text/sms, HTML-escaped
-      channels/          email-resend.ts (live) · sms-stub.ts (NOT SENT)
+      channels/          email-smtp.ts (live) · sms-stub.ts (NOT SENT)
     admin/
       handler.ts         adminRoute() — ADMIN guard + DB error mapping
       config-health.ts   Rate-card coverage gaps, pincode conflicts

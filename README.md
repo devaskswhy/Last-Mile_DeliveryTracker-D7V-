@@ -185,24 +185,17 @@ no separate visual language for "the boring pages."
 
 ### Proof that email actually sends
 
-**This build's Resend account is on the free sandbox tier**, which Resend
-restricts to delivering only to the single address that owns the account. That
-address is not something you can substitute your own email for while
-reviewing — it is already a registered account on this deployment, and its
-inbox is not something this submission can hand you access to. Whatever
-address you use while working through the walkthrough above, **no email will
-reach you**, and that is expected rather than something to debug. The app
-still logs every attempt and correctly reports it as undelivered internally;
-it just has no way to surface that to whoever is waiting on the email.
+**Email works for any address, including yours.** Register with your own
+inbox in the walkthrough above, place an order, or use "forgot password" —
+the message will arrive. This deployment sends through a real Gmail account
+over SMTP (Nodemailer, authenticated with an app password), which has no
+per-recipient restriction, so there is no reviewer-specific inbox you need
+access to and nothing that only works for the account owner.
 
-The screenshots below are the evidence for what your own testing cannot show
-you: both were sent by this exact deployment, to that one reachable address,
-while testing the flows above.
-
-This is a Resend account limitation, not an application bug — confirmed
-directly against the API: `403 "You can only send testing emails to your own
-email address"`. Verifying a domain removes it for every recipient and needs
-no code change; out of scope for this assignment.
+The screenshots below are simply a second form of the same evidence, captured
+from a real inbox during earlier testing of the flows above — not a
+substitute for trying it yourself, just a record in case you'd rather not
+wait on your own mail to arrive.
 
 <table>
 <tr>
@@ -253,7 +246,7 @@ because the endpoint was called.
 | ----------- | ----- |
 | Node.js 18.17+ | Developed on Node 22/25; Next 14 needs ≥ 18.17 |
 | A PostgreSQL database | Neon's free tier works; any Postgres 13+ does |
-| A Resend API key | Optional — without it email is logged, not sent |
+| A Gmail account + app password | Optional — without it email is logged, not sent |
 
 ### Install and run
 
@@ -303,8 +296,9 @@ committed.
 | `SEED_ADMIN_EMAIL` | no | Default `admin@lastmile.local`. |
 | `SEED_ADMIN_PASSWORD` | seed only | Required by `npm run db:seed`. No fallback. |
 | `SEED_AGENT_PASSWORD` | seed only | Required by `npm run db:seed`. No fallback. |
-| `RESEND_API_KEY` | no | Enables real email. Without it the channel reports itself unconfigured and logs instead of sending. |
-| `EMAIL_FROM_ADDRESS` | no | Sender. Use `onboarding@resend.dev` until you verify a domain. |
+| `SMTP_USER` | no | A Gmail address. Without it (and `SMTP_PASS`) the channel reports itself unconfigured and logs instead of sending. |
+| `SMTP_PASS` | no | A 16-character [Gmail app password](https://myaccount.google.com/apppasswords) — not the account password. |
+| `EMAIL_FROM_NAME` | no | Display name on outgoing mail. Defaults to `Last-Mile Delivery`. |
 | `EMAIL_FROM_NAME` | no | Sender display name. |
 | `NEXT_PUBLIC_APP_URL` | no | Base URL for tracking links in emails. **Set this in production** or emailed links point at localhost. |
 
@@ -1042,32 +1036,32 @@ Every one of these fires a notification:
 | `DELIVERY_RESCHEDULED` | `lib/orders/reschedule.ts` — new date and attempt number |
 | `ORDER_REASSIGNED` | `lib/orders/assign.ts` — names the previous agent |
 
-### Email — live, via Resend
+### Email — live, via Gmail SMTP
 
-Fully implemented in `channels/email-resend.ts`. Every message is templated
-HTML plus a plain-text alternative carrying the **order number, the new status,
-and a tracking link** back to `/orders/[id]`.
+Fully implemented in `channels/email-smtp.ts`, built on the shared low-level
+sender in `channels/smtp-client.ts`. Every message is templated HTML plus a
+plain-text alternative carrying the **order number, the new status, and a
+tracking link** back to `/orders/[id]`.
 
-**Resend was chosen over Nodemailer + Gmail** because it is an HTTP API: it
-needs nothing but `fetch`, so it adds **no dependency** to a project that keeps
-its package list deliberately short. Nodemailer would have meant a new package,
-SMTP connection handling, and Gmail app-password setup to do the same job.
+**Nodemailer, authenticated against a real Gmail account with an app
+password**, was chosen over a hosted HTTP provider like Resend for one
+reason: every free-tier hosted provider tried here restricts an unverified
+account to sending only to the address that owns it, which is fine for a
+solo demo and wrong for a submission a reviewer has to test with their own
+address. Gmail SMTP has no such restriction — mail reaches any address, at
+no cost, with no domain to verify, well under Gmail's ordinary per-day
+sending limit (about 500) for a grading session.
 
-To turn it on, set `RESEND_API_KEY` in `.env`. Without it the channel reports
-itself unconfigured and the message is logged instead — the app never claims a
-send that did not happen.
+To turn it on, set `SMTP_USER` (a Gmail address) and `SMTP_PASS` (a 16-character
+[app password](https://myaccount.google.com/apppasswords), not the account
+password — requires 2-Step Verification to be enabled) in `.env`. Without both,
+the channel reports itself unconfigured and the message is logged instead — the
+app never claims a send that did not happen. `SMTP_HOST` / `SMTP_PORT` default
+to `smtp.gmail.com` / `587` and only need overriding for a non-Gmail provider.
 
-> **Free-tier limit worth knowing:** until you verify a domain with Resend, the
-> sandbox sender (`onboarding@resend.dev`) only delivers to the email address
-> that owns the Resend account. Mail to any other customer address — order
-> emails **and** the [password-reset link](#password-reset) alike, since both
-> go through this same channel — is accepted by the API and then dropped.
-> Confirmed directly against Resend: `403 "You can only send testing emails to
-> your own email address"`. The app already handles this correctly: it logs
-> the rejection and reports the send as failed internally, it just has no way
-> to surface that to whoever is waiting on the email. Verify a domain to lift
-> the restriction for every recipient — a one-line env var change afterward,
-> no code to touch.
+Order emails **and** the [password-reset link](#password-reset) both go
+through this same channel, so both benefit equally from having no
+per-recipient restriction.
 
 Interpolated text is HTML-escaped. A failure reason is typed by an agent and a
 delivery note by a customer; both land in an email body, so unescaped
@@ -1118,8 +1112,8 @@ Three layers back that up:
    propagated.
 3. The whole body is wrapped, so even a template bug is logged and swallowed.
 
-The Resend call is also bounded by an 8-second `AbortController` timeout, so a
-hanging provider delays an agent's response by seconds rather than indefinitely.
+The SMTP send is also bounded by a 10-second timeout, so a hanging server
+delays an agent's response by seconds rather than indefinitely.
 
 Every outcome is logged per channel with whether it was sent and why not:
 
@@ -1271,8 +1265,8 @@ most Prisma-on-Vercel breakage comes down to.
    | `DIRECT_URL` | Neon **direct** string (same host, no `-pooler`) |
    | `JWT_SECRET` | 32+ random characters — generate a fresh one, do not reuse a local secret |
    | `NEXT_PUBLIC_APP_URL` | `https://<your-deployment>.vercel.app` |
-   | `RESEND_API_KEY` | Optional; without it email is logged, not sent |
-   | `EMAIL_FROM_ADDRESS` | `onboarding@resend.dev` until a domain is verified |
+   | `SMTP_USER` | Optional; without it (and `SMTP_PASS`) email is logged, not sent |
+   | `SMTP_PASS` | A 16-character [Gmail app password](https://myaccount.google.com/apppasswords) |
    | `EMAIL_FROM_NAME` | `Last-Mile Delivery` |
 
    `NEXT_PUBLIC_APP_URL` matters more than it looks: it is the base for tracking
