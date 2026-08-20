@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { apiRequest } from "../_components/client";
+import { apiRequest } from "@/components/client";
 import {
   Button,
   Field,
@@ -12,7 +12,7 @@ import {
   cellClass,
   inputClass,
   rowClass,
-} from "../_components/ui";
+} from "@/components/ui";
 
 export interface AreaRow {
   id: string;

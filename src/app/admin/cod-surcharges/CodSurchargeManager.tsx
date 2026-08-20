@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 
 import { ORDER_TYPES, SURCHARGE_MODES } from "@/lib/domain/enums";
 
-import { apiRequest } from "../_components/client";
+import { apiRequest } from "@/components/client";
 import {
   Button,
   Field,
@@ -14,7 +14,7 @@ import {
   cellClass,
   inputClass,
   rowClass,
-} from "../_components/ui";
+} from "@/components/ui";
 
 export interface SurchargeRow {
   orderType: string;

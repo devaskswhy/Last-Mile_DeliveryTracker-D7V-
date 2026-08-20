@@ -254,6 +254,125 @@ gates routes by role on the Edge runtime; route handlers re-verify through
 
 ---
 
+## Orders and assignment
+
+### Creating an order
+
+Two entry points, one code path: `/orders/new` for a customer, `/admin/orders/new`
+for an admin acting on a customer's behalf. Both call `POST /api/orders/quote`
+live, render the itemised charge, and require an explicit confirmation step.
+
+The quote is bound to the exact inputs that produced it. Editing any field that
+affects the price clears it, so the confirm button can never submit a total the
+customer is no longer looking at.
+
+> **Charges are never accepted from the client.** `POST /api/orders` recomputes
+> the price server-side with the *same* `calculateRate` the quote endpoint uses.
+> The one figure the client sends is `acknowledgedTotal` — required, and used
+> only as a claim to verify. If it disagrees with the recomputed price the
+> request is refused with `409 QUOTE_STALE` and the fresh quote attached, so a
+> rate card edited between quote and confirm cannot silently change what the
+> customer agreed to pay, and a tampered payload cannot set its own total.
+
+A `CUSTOMER` may only create their own orders; any `customerId` in their payload
+is ignored rather than trusted. An `ADMIN` must name the customer. Agents cannot
+create orders at all.
+
+Creation is one transaction: the `Order` row, its `CREATED` history entry, and —
+when an agent is found — the assignment and its `ASSIGNED` entry.
+
+### Auto-assignment: fewest active orders
+
+Given an order's pickup zone, the policy considers agents whose `currentZoneId`
+is that zone, whose `availability` is `AVAILABLE`, and whose user account is
+active. Among those it picks the one with the fewest orders in a status that
+still needs work (`ASSIGNED`, `PICKED_UP`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`).
+Ties break on `employeeCode` so the same inputs always give the same agent.
+
+**Why load balancing rather than nearest by lat/lng**, given the schema carries
+`currentLat` / `currentLng`:
+
+1. **The data is always true.** An active-order count is derived from the orders
+   table and cannot be stale. Coordinates are nullable and only as fresh as the
+   last device check-in — `lastLocationAt` exists precisely because they go
+   stale. Assigning on a stale position fails silently: the dispatch looks
+   reasonable and the parcel is simply late.
+2. **Straight-line distance is not travel distance.** Great-circle metres ignore
+   rivers, one-way systems, and an agent already heading the other way.
+3. **Proximity alone overloads people.** The closest agent to a busy catchment is
+   closest to *every* order in it. Balancing on load is self-correcting: whoever
+   takes an order becomes less eligible for the next.
+
+Zone membership already supplies the geographic constraint, so distance would be
+refining a choice that is geographically sound to begin with. The coordinates
+stay in the schema for a future dispatcher with a real routing service.
+
+`selectAgent()` is a pure function, tested exhaustively without a database.
+
+### When nobody is available
+
+The order is created **unassigned**: status `CREATED`, no agent, and a history
+note recording why. It appears in the admin orders screen under a banner
+counting how many are waiting. An admin can then assign manually or re-run
+auto-assignment on demand once someone frees up.
+
+### Assignment API
+
+`POST /api/admin/orders/[id]/assign` — ADMIN only.
+
+```jsonc
+{ "mode": "MANUAL", "agentId": "..." }   // explicit choice
+{ "mode": "AUTO" }                        // re-run the policy
+```
+
+Manual assignment deliberately ignores availability and zone — that is what an
+override is for, and a dispatcher looking at a real situation knows things the
+policy does not. The one thing it refuses is a deactivated account.
+
+| Code | Status | Meaning |
+| ---- | ------ | ------- |
+| `ORDER_NOT_FOUND` / `AGENT_NOT_FOUND` | 404 | No such record |
+| `ORDER_TERMINAL` | 409 | Delivered, cancelled or failed — the work is over |
+| `ALREADY_ASSIGNED` | 409 | Already that agent; refused so the trail gains no empty row |
+| `NO_AGENT_AVAILABLE` | 409 | Auto-assignment found nobody eligible |
+| `AGENT_INACTIVE` | 422 | The agent's account is deactivated |
+
+Reassignment does not rewind the workflow: an order already picked up stays
+picked up, and only an unassigned one advances to `ASSIGNED`. That keeps each
+history row's `status` equal to the order's status at that moment, so the trail
+reads as a status log rather than a mix of two things.
+
+### Audit trail
+
+Every creation and every assignment appends to `order_status_history` with
+timestamp, actor and actor role. `src/lib/orders/history.ts` is the only module
+that writes to that table and it only ever calls `create` — the Postgres trigger
+from Phase 1 is the safety net, not the mechanism. A real trail looks like:
+
+```
+1. —        → CREATED   Created by the customer
+2. CREATED  → ASSIGNED  Auto-assigned to Asha Rane (AGT-001) — strategy FEWEST_ACTIVE_ORDERS
+3. ASSIGNED → ASSIGNED  Reassigned from Asha Rane (AGT-001) to Vikram Iyer (AGT-002) — manual assignment by admin
+4. ASSIGNED → ASSIGNED  Reassigned from Vikram Iyer (AGT-002) to Asha Rane (AGT-001) — auto-assignment
+```
+
+### Order API
+
+| Method | Path | Access |
+| ------ | ---- | ------ |
+| POST | `/api/orders` | CUSTOMER (own), ADMIN (on behalf) |
+| GET | `/api/orders` | Scoped: own / assigned / all |
+| GET | `/api/orders/[id]` | Owner, assigned agent, or admin |
+| POST | `/api/admin/orders/[id]/assign` | ADMIN |
+| GET | `/api/admin/agents` | ADMIN — agents with live workload |
+| GET | `/api/admin/customers?q=` | ADMIN — customer search |
+
+Listing is scoped from the re-read session, never from a query parameter: a
+customer sees their own orders, an agent sees what is assigned to them, an admin
+sees everything.
+
+---
+
 ## Notes
 
 `order_status_history` is append-only and enforced by a Postgres trigger —

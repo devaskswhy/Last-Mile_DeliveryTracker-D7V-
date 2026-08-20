@@ -12,6 +12,7 @@ const NAV = [
   { href: "/admin/areas", label: "Areas" },
   { href: "/admin/rate-cards", label: "Rate cards" },
   { href: "/admin/cod-surcharges", label: "COD surcharges" },
+  { href: "/admin/orders", label: "Orders" },
 ];
 
 /**

@@ -118,6 +118,23 @@ export function ceilDivide(numerator: bigint, denominator: bigint): bigint {
 
 export const max = (a: bigint, b: bigint): bigint => (a > b ? a : b);
 
+/**
+ * Compares two money strings for equality at minor-unit precision.
+ *
+ * String equality is not enough: "700.00", "700.0" and "700" are the same
+ * amount written three ways, and a client that trimmed a trailing zero would
+ * otherwise be told the price had changed. Anything unparseable compares as
+ * unequal rather than throwing — a malformed confirmation is a mismatch, not a
+ * crash.
+ */
+export function equalsMoney(a: string, b: string): boolean {
+  try {
+    return parseFixed(a, MONEY_SCALE) === parseFixed(b, MONEY_SCALE);
+  } catch {
+    return false;
+  }
+}
+
 /** Decimal places used by each kind of quantity, mirroring the Prisma columns. */
 export const MONEY_SCALE = 2;
 export const WEIGHT_SCALE = 3;
