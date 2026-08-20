@@ -262,6 +262,32 @@ export function OrderForm({
     isAddressComplete(pickup) &&
     isAddressComplete(drop);
 
+  /**
+   * Why the button is disabled, checked in the same order `canConfirm`
+   * checks its own conditions, so this always names the actual blocker.
+   *
+   * Before this existed, a quote showing a real price gave no sign that
+   * Confirm was still disabled for an unrelated reason — pickup or drop
+   * missing a contact name, phone or address line. The button just sat there
+   * looking broken. A visible price is not the only requirement to create an
+   * order, so the message has to track all of them, not just the price.
+   */
+  const confirmBlockedReason = (): string | null => {
+    if (!quoteIsCurrent) {
+      return "A current quote is required before an order can be created.";
+    }
+    if (createdBy === "ADMIN" && customerId === "") {
+      return "Select which customer this order is for.";
+    }
+    if (!isAddressComplete(pickup) || !isAddressComplete(drop)) {
+      return "Fill in the contact name, phone and address line for both pickup and drop.";
+    }
+    if (paymentType === "COD" && codAmount === "") {
+      return "Enter the amount to collect on delivery.";
+    }
+    return null;
+  };
+
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
       <div className="flex flex-col gap-6">
@@ -372,9 +398,8 @@ export function OrderForm({
         </Button>
 
         <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-muted">
-          {quoteIsCurrent
-            ? "The server re-prices this on confirm and rejects it if the total has changed."
-            : "A current quote is required before an order can be created."}
+          {confirmBlockedReason() ??
+            "The server re-prices this on confirm and rejects it if the total has changed."}
         </p>
       </div>
     </div>
