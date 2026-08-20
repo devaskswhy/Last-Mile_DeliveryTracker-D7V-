@@ -974,6 +974,61 @@ and all copy is server-rendered.
 
 ---
 
+## Deployment
+
+The app is a standard Next.js 14 App Router project and needs no adapter or
+custom build step — `postinstall` already runs `prisma generate`, which is what
+most Prisma-on-Vercel breakage comes down to.
+
+### Vercel
+
+1. **Import the repo** at [vercel.com/new](https://vercel.com/new). Framework
+   preset is detected as Next.js; leave build and output settings alone.
+2. **Set the environment variables** below under *Settings → Environment
+   Variables*, for Production (and Preview if you want branch deploys):
+
+   | Variable | Value |
+   | -------- | ----- |
+   | `DATABASE_URL` | Neon **pooled** string (host contains `-pooler`) |
+   | `DIRECT_URL` | Neon **direct** string (same host, no `-pooler`) |
+   | `JWT_SECRET` | 32+ random characters — generate a fresh one, do not reuse a local secret |
+   | `NEXT_PUBLIC_APP_URL` | `https://<your-deployment>.vercel.app` |
+   | `RESEND_API_KEY` | Optional; without it email is logged, not sent |
+   | `EMAIL_FROM_ADDRESS` | `onboarding@resend.dev` until a domain is verified |
+   | `EMAIL_FROM_NAME` | `Last-Mile Delivery` |
+
+   `NEXT_PUBLIC_APP_URL` matters more than it looks: it is the base for tracking
+   links in email. Leave it unset and every emailed link points at localhost.
+
+3. **Run migrations against the production database** once, from your machine
+   with the production `DIRECT_URL` in scope:
+
+   ```bash
+   DIRECT_URL="<production direct url>" npx prisma migrate deploy
+   ```
+
+   `migrate deploy` applies committed migrations without prompting and never
+   generates new ones — it is the CI-safe counterpart to `migrate dev`.
+
+4. **Seed the production database**, with passwords you choose:
+
+   ```bash
+   DATABASE_URL="…" DIRECT_URL="…"    SEED_ADMIN_PASSWORD="…" SEED_AGENT_PASSWORD="…" npm run db:seed
+   ```
+
+5. **Verify end to end** on the deployed URL: register a customer, fill the
+   order form and watch the quote update, confirm the order, sign in as the
+   admin to reassign it, sign in as an agent to advance its status, and check
+   that email arrived.
+
+### Anywhere else
+
+Render and Railway both work the same way — Node build, `npm run build`, start
+with `npm start`. The only hard requirements are the two Postgres URLs and
+`JWT_SECRET`.
+
+---
+
 ## Notes
 
 `order_status_history` is append-only and enforced by a Postgres trigger —
