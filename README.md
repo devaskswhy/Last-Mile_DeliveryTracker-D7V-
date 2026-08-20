@@ -30,6 +30,13 @@ These are seed accounts on this assignment's demo database, created for
 evaluation and reset by re-running `npm run db:seed` — not credentials for
 anything beyond this submission.
 
+Admin and agent accounts are fixed rather than self-registered because the app
+enforces that on purpose — `POST /api/auth/register` only ever creates a
+`CUSTOMER`; those two roles are provisioned by seed, never by sign-up. That is
+unrelated to email: admin/agent accounts don't receive order notifications
+either way, only the customer on an order does — so register your own address
+as a customer in step 1 below and that is where you will see it work.
+
 ### Five-minute walkthrough
 
 **1. Customer — quote and order.** Register at `/register`. Go to **New
@@ -38,7 +45,8 @@ seeded zones — any other pincode correctly reports "no serviceable area",
 since there is no real geocoding behind this, only the admin-configured zone
 map). Watch the quote panel price live as you fill in dimensions and weight.
 Confirm — the order is created and auto-assigned to whichever agent is free
-in the pickup zone.
+in the pickup zone, and an order-confirmation email lands in the inbox you
+registered with, usually within a few seconds.
 
 **2. Admin — configuration and control.** Sign out, sign in as the admin.
 `/admin` shows zone/rate-card coverage; `/admin/zones`, `/admin/areas`,
@@ -58,14 +66,14 @@ auto-assignment runs again — worth confirming it doesn't just hand the order
 back to the agent who already failed it (it re-ranks by current load, so it
 won't unless they're genuinely the only one free).
 
-**5. Password reset.** From `/login`, **Forgot password?** → enter any email,
-registered or not. The confirmation message is identical either way — that is
-deliberate (see [Password reset](#password-reset) for why), and it is the part
-of this step you can verify directly. Completing the rest — opening the
-emailed link and setting a new password — needs an inbox that receives the
-message, which for the reason below is not one your testing session has
-access to; the second screenshot is that step completed, on this deployment,
-during testing.
+**5. Password reset.** From `/login`, **Forgot password?** → enter the address
+you registered in step 1. The confirmation message is identical whether or not
+an account exists for that address — that is deliberate (see [Password
+reset](#password-reset) for why). Unlike the demo credentials above, this one
+you can complete end to end: the email arrives in your own inbox within a few
+seconds, and the link takes you to `/reset-password` to set a new password on
+this deployment. The screenshot below is the same email, captured during
+earlier testing, in case you'd rather not wait on your own mail to arrive.
 
 ### Screenshots
 
