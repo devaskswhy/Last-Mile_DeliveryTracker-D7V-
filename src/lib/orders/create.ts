@@ -245,6 +245,19 @@ async function persist(
       select: { id: true, orderNumber: true },
     });
 
+    // Attempt 1 opens with the order. `scheduledFor` is null: the customer has
+    // not picked a date, this is simply "as soon as possible". A failure closes
+    // it and rescheduling opens attempt 2 with the date they choose.
+    await tx.deliveryAttempt.create({
+      data: {
+        orderId: order.id,
+        attemptNumber: 1,
+        status: "SCHEDULED",
+        scheduledFor: null,
+        agentId: agent?.agentId ?? null,
+      },
+    });
+
     const createdBy =
       actor.role === "ADMIN"
         ? "Created by an admin on behalf of the customer"

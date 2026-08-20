@@ -1,5 +1,5 @@
 import type { Role } from "@/lib/auth/roles";
-import { isTerminalStatus } from "@/lib/domain/order-status";
+import { isClosedStatus } from "@/lib/domain/order-status";
 import { prisma } from "@/lib/prisma";
 
 import { ASSIGNMENT_STRATEGY, chooseAgentForZone } from "./assignment";
@@ -86,7 +86,7 @@ export async function assignOrder(
 
     // A delivered, cancelled or failed order is closed. Reassigning one would
     // record a handover of work that no longer exists.
-    if (isTerminalStatus(order.status)) {
+    if (isClosedStatus(order.status)) {
       throw new AssignError(
         "ORDER_TERMINAL",
         `Order ${order.orderNumber} is ${order.status} and cannot be reassigned`,

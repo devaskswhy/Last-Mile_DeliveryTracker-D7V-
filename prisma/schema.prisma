@@ -50,6 +50,14 @@ enum AgentAvailability {
   OFFLINE
 }
 
+/// Outcome of one scheduled delivery attempt on an order.
+enum DeliveryAttemptStatus {
+  SCHEDULED
+  FAILED
+  DELIVERED
+  SUPERSEDED
+}
+
 enum OrderStatus {
   CREATED
   ASSIGNED
@@ -196,9 +204,10 @@ model Agent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  currentZone Zone?   @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)
-  orders      Order[] @relation("AssignedAgent")
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentZone Zone?             @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)
+  orders      Order[]           @relation("AssignedAgent")
+  attempts    DeliveryAttempt[] @relation("AttemptAgent")
 
   @@index([availability, currentZoneId])
   @@map("agents")
@@ -254,9 +263,9 @@ model Order {
 
   /// RateCard used at creation time; kept for auditability if the card later changes.
   rateCardId    String?
-  freightCharge Decimal  @db.Decimal(10, 2)
-  codSurcharge  Decimal  @default(0) @db.Decimal(10, 2)
-  totalCharge   Decimal  @db.Decimal(10, 2)
+  freightCharge Decimal @db.Decimal(10, 2)
+  codSurcharge  Decimal @default(0) @db.Decimal(10, 2)
+  totalCharge   Decimal @db.Decimal(10, 2)
 
   /// Amount to collect from the consignee when paymentType = COD.
   codAmount Decimal? @db.Decimal(10, 2)
@@ -276,12 +285,54 @@ model Order {
   dropZone      Zone                 @relation("DropZone", fields: [dropZoneId], references: [id], onDelete: Restrict)
   assignedAgent Agent?               @relation("AssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
   statusHistory OrderStatusHistory[]
+  attempts      DeliveryAttempt[]
 
   @@index([customerId])
   @@index([assignedAgentId])
   @@index([status])
   @@index([createdAt])
   @@map("orders")
+}
+
+// ---------------------------------------------------------------------------
+// Delivery attempts
+// ---------------------------------------------------------------------------
+
+/// One scheduled attempt to deliver an order.
+///
+/// An order starts with attempt 1 (`scheduledFor` null — as soon as possible).
+/// A failed delivery marks that attempt FAILED with a reason; rescheduling
+/// opens the next attempt carrying the date the customer chose. Unlike
+/// `order_status_history` this table is mutable — it records the *plan*, and a
+/// plan legitimately changes. The immutable record of what happened stays in
+/// the history table.
+model DeliveryAttempt {
+  id            String                @id @default(cuid())
+  orderId       String
+  attemptNumber Int
+  status        DeliveryAttemptStatus @default(SCHEDULED)
+
+  /// The date the customer asked for. Null on the first attempt, which is
+  /// simply "as soon as possible".
+  scheduledFor DateTime?
+
+  /// Agent responsible at the time of the attempt, kept even if the order is
+  /// later reassigned, so each attempt records who actually tried.
+  agentId       String?
+  failureReason String?
+  failedAt      DateTime?
+  deliveredAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  agent Agent? @relation("AttemptAgent", fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([orderId, attemptNumber])
+  @@index([orderId])
+  @@index([status])
+  @@map("delivery_attempts")
 }
 
 // ---------------------------------------------------------------------------

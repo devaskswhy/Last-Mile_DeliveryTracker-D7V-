@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { RescheduleForm } from "@/components/RescheduleForm";
 import { AuthError, requireActiveUser } from "@/lib/auth/guard";
 import { prisma } from "@/lib/prisma";
 
@@ -36,6 +37,14 @@ export default async function OrderDetailPage({
       customer: { select: { id: true, name: true, email: true } },
       assignedAgent: {
         select: { employeeCode: true, userId: true, user: { select: { name: true } } },
+      },
+      attempts: {
+        orderBy: { attemptNumber: "asc" },
+        include: {
+          agent: {
+            select: { employeeCode: true, user: { select: { name: true } } },
+          },
+        },
       },
       statusHistory: {
         orderBy: { createdAt: "asc" },
@@ -118,6 +127,42 @@ export default async function OrderDetailPage({
             ? `${order.assignedAgent.user.name} (${order.assignedAgent.employeeCode})`
             : "Not yet assigned — an admin will assign an agent."}
         </p>
+      </section>
+
+      {order.status === "FAILED" && (isOwner || user.role === "ADMIN") ? (
+        <div className="mt-6">
+          <RescheduleForm
+            orderId={order.id}
+            failureReason={
+              [...order.attempts]
+                .reverse()
+                .find((attempt) => attempt.failureReason)?.failureReason ?? null
+            }
+          />
+        </div>
+      ) : null}
+
+      <section className="mt-6 rounded border border-gray-200 p-4 dark:border-gray-800">
+        <h2 className="mb-2 text-sm font-medium">
+          Delivery attempts ({order.attempts.length})
+        </h2>
+        <ol className="flex flex-col gap-2 text-sm">
+          {order.attempts.map((attempt) => (
+            <li key={attempt.id} className="flex flex-wrap justify-between gap-2">
+              <span>
+                Attempt {attempt.attemptNumber} —{" "}
+                <span className="font-mono text-xs">{attempt.status}</span>
+                {attempt.agent ? ` · ${attempt.agent.user.name}` : ""}
+              </span>
+              <span className="text-gray-600 dark:text-gray-400">
+                {attempt.scheduledFor
+                  ? attempt.scheduledFor.toISOString().slice(0, 10)
+                  : "as soon as possible"}
+                {attempt.failureReason ? ` · ${attempt.failureReason}` : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section className="mt-6">

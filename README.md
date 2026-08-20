@@ -373,6 +373,123 @@ sees everything.
 
 ---
 
+## Status lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> CREATED
+  CREATED --> ASSIGNED: agent assigned
+  ASSIGNED --> PICKED_UP: agent
+  PICKED_UP --> IN_TRANSIT: agent
+  IN_TRANSIT --> OUT_FOR_DELIVERY: agent
+  OUT_FOR_DELIVERY --> DELIVERED: agent
+  IN_TRANSIT --> FAILED: agent
+  OUT_FOR_DELIVERY --> FAILED: agent
+  FAILED --> ASSIGNED: reschedule (agent found)
+  FAILED --> CREATED: reschedule (none free)
+  CREATED --> CANCELLED
+  ASSIGNED --> CANCELLED
+  PICKED_UP --> CANCELLED
+  IN_TRANSIT --> CANCELLED
+  DELIVERED --> [*]
+  CANCELLED --> [*]
+```
+
+The table lives in `src/lib/domain/order-status.ts` and is the single authority:
+the API validates against it and the agent UI derives its buttons from it, so a
+screen cannot offer a move the server would reject.
+
+**`ASSIGNED` sits between `CREATED` and `PICKED_UP`** because an agent may only
+act on work that is theirs — nobody is entitled to pick up an unassigned order.
+
+**`FAILED` is not closed.** Only `DELIVERED` and `CANCELLED` are. A failed
+delivery is the point at which the customer picks a new date and the order
+re-enters the pipeline; treating it as terminal would block the very
+reassignment that rescheduling depends on.
+
+**`FAILED` is reachable only from `IN_TRANSIT` and `OUT_FOR_DELIVERY`** — a
+parcel has to be moving before delivery can fail.
+
+### Who may do what
+
+| Actor | Permitted |
+| ----- | --------- |
+| **Agent** | `ASSIGNED→PICKED_UP`, `PICKED_UP→IN_TRANSIT`, `IN_TRANSIT→OUT_FOR_DELIVERY\|FAILED`, `OUT_FOR_DELIVERY→DELIVERED\|FAILED` — and only on orders assigned to them |
+| **Customer** | Reschedule their own failed order; view their own orders. No status changes. |
+| **Admin** | Any status, via override, with a mandatory reason |
+
+`AGENT_TRANSITIONS` is a strict subset of `ALLOWED_TRANSITIONS`, enforced by a
+unit test. Agents move work forward and report failures; they do not cancel,
+move backwards, or reschedule.
+
+### Delivery attempts
+
+An order opens with attempt 1 (`scheduledFor` null — as soon as possible). A
+failure closes that attempt with its reason; rescheduling opens the next one
+carrying the date the customer chose.
+
+`delivery_attempts` is mutable by design — it records the *plan*, and a plan
+legitimately changes. The immutable record of what happened stays in
+`order_status_history`.
+
+Rescheduling **re-runs auto-assignment** rather than reusing the previous agent:
+they may be off shift, out of the zone, or busier than a colleague, and an
+attempt that already failed is not evidence they should get the next one. If
+nobody is free the order returns to `CREATED` unassigned, exactly as at
+creation.
+
+### Notifications
+
+`src/lib/notifications/` defines the `Notifier` interface and is called at every
+point a customer should hear something. Phase 5 ships `ConsoleNotifier`, which
+logs and returns `delivered: false` rather than pretending — nothing downstream
+can mistake "wired up" for "the customer was told". Phase 6 supplies a
+provider-backed implementation of the same interface.
+
+Notifications are sent **after** the transaction commits and can never fail the
+caller. A provider outage must not surface as a failed status update, or an
+agent would retry a transition that already succeeded and the audit trail would
+gain a duplicate entry for one real event.
+
+### Lifecycle API
+
+| Method | Path | Access |
+| ------ | ---- | ------ |
+| GET | `/api/agent/orders` | AGENT — own workload with available moves |
+| POST | `/api/agent/orders/[id]/status` | AGENT — own orders only |
+| POST | `/api/admin/orders/[id]/status` | ADMIN — override, reason required |
+| POST | `/api/orders/[id]/reschedule` | Order owner or ADMIN |
+| GET | `/api/orders/[id]/tracking` | Owner, assigned agent, or ADMIN |
+
+| Code | Status | Meaning |
+| ---- | ------ | ------- |
+| `NOT_YOUR_ORDER` | 403 | Agent acting on someone else's order, or a customer changing status |
+| `INVALID_TRANSITION` | 422 | The state machine forbids that move |
+| `ORDER_CLOSED` | 409 | Already delivered or cancelled |
+| `SAME_STATUS` | 409 | No-op, refused so the trail gains no empty row |
+| `REASON_REQUIRED` | 422 | An override without a reason |
+| `NOT_FAILED` | 409 | Only a failed delivery can be rescheduled |
+| `DATE_IN_PAST` | 422 | The new delivery date must be in the future |
+
+### A real trail
+
+```
+1. —                → CREATED           Created by the customer
+2. CREATED          → ASSIGNED          Auto-assigned to Asha Rane (AGT-001)
+3. ASSIGNED         → PICKED_UP         Status updated                        [AGENT]
+4. PICKED_UP        → IN_TRANSIT        Status updated                        [AGENT]
+5. IN_TRANSIT       → OUT_FOR_DELIVERY  Status updated                        [AGENT]
+6. OUT_FOR_DELIVERY → FAILED            Nobody at the address; building locked [AGENT]
+7. FAILED           → ASSIGNED          Rescheduled for 2026-09-01 (attempt 2) [CUSTOMER]
+8. ASSIGNED         → ASSIGNED          Auto-assigned to Asha Rane for attempt 2
+```
+
+Every row is an insert. Nothing above is ever edited or deleted — the Postgres
+trigger from Phase 1 makes that impossible, and `src/lib/orders/history.ts` is
+the only module that writes to the table.
+
+---
+
 ## Notes
 
 `order_status_history` is append-only and enforced by a Postgres trigger —

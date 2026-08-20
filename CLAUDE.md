@@ -33,7 +33,11 @@ Two further rules that the database itself enforces:
    describe the shape of the domain (`B2B` / `B2C`, `INTRA` / `INTER`), which is
    structural, and each is guarded by a `satisfies` check against the Prisma
    enum so it cannot drift.
-4. **A price is never accepted from a client.** `POST /api/orders` recomputes
+4. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
+   A failed delivery is rescheduled into a new attempt, so treating it as
+   terminal would block the reassignment that reschedule depends on. Use
+   `isClosedStatus()`, never a hand-rolled list.
+5. **A price is never accepted from a client.** `POST /api/orders` recomputes
    the charge with the same `calculateRate()` the quote endpoint uses. The
    client sends `acknowledgedTotal` only so the server can *check* it; a
    mismatch is refused with `QUOTE_STALE`. Never persist a charge that arrived
@@ -87,6 +91,7 @@ src/
     admin/               Admin UI — server components read Prisma directly,
                          client components mutate through the admin API
     orders/              Customer order UI (create, list, detail + history)
+    agent/               Agent workload UI with status actions
   components/            UI primitives + OrderForm, shared by both surfaces
     login/ forbidden/    Pages that middleware redirects to
   lib/
@@ -103,18 +108,22 @@ src/
       money.ts           Decimal input — validated as strings, never floats
     domain/
       enums.ts           Structural enum mirrors + deriveScope()
-      order-status.ts    ACTIVE_ORDER_STATUSES / terminal statuses
+      order-status.ts    The state machine — ALLOWED/AGENT transitions
     rate-engine/
       engine.ts          calculateRate() — PURE, synchronous, no I/O
       decimal.ts         bigint fixed-point; no float ever touches a price
       errors.ts          RateEngineError + stable error codes
       config-source.ts   loadRateConfig() — the only part that reads Prisma
       engine.test.ts     Vitest; fixtures only, no database
+    notifications/     Notifier interface + ConsoleNotifier (Phase 6 swaps it)
     admin/
       handler.ts         adminRoute() — ADMIN guard + DB error mapping
       config-health.ts   Rate-card coverage gaps, pincode conflicts
     orders/
       create.ts          createOrder() — recomputes the price, never trusts it
+      status.ts          updateOrderStatus() — state machine + role rules
+      reschedule.ts      New attempt after a failure, re-runs assignment
+      tracking.ts        Customer-facing timeline + access rules
       assignment.ts      selectAgent() — PURE policy + candidate loading
       assign.ts          Manual/auto (re)assignment for admins
       history.ts         The ONLY writer to order_status_history
