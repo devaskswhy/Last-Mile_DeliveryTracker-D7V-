@@ -1,10 +1,10 @@
 import { escapeHtml } from "@/lib/notifications/templates";
-import { sendViaResend } from "@/lib/notifications/channels/resend-client";
+import { sendViaSmtp } from "@/lib/notifications/channels/smtp-client";
 
 /**
  * The password-reset email.
  *
- * Sent directly through the low-level Resend client rather than through
+ * Sent directly through the low-level SMTP client rather than through
  * `notify()` — that dispatcher's whole shape (`NotifiableOrder`, order-status
  * events) is order code talking about an order. A password reset is account
  * code talking about an account; forcing it through the order-shaped
@@ -57,7 +57,7 @@ export async function sendPasswordResetEmail(
     "If you did not request this, no action is needed.",
   ].join("\n");
 
-  const result = await sendViaResend({
+  const result = await sendViaSmtp({
     to,
     subject: "Reset your Last-Mile password",
     html,

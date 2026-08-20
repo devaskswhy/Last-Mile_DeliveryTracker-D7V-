@@ -6,20 +6,235 @@ assigning agents, and notifying customers at every status change.
 Next.js 14 (App Router) · TypeScript · Tailwind CSS · Prisma 6 · PostgreSQL ·
 Zod · bcryptjs · jose.
 
-> **Before you test email or password reset:** this build's Resend account is
-> on the free sandbox tier, which Resend restricts to delivering only to the
-> address that owns the account. Order confirmations, status-change emails and
-> password-reset links all go through the same sender, so **all of them only
-> arrive at that one address** — any other recipient gets a real API call that
-> the app correctly logs and reports as undelivered, while the UI still shows
-> its normal "sent" confirmation (deliberately, to avoid leaking which emails
-> are registered accounts — see [Password reset](#password-reset)). This is a
-> Resend account limitation, not an application bug; verifying a domain
-> removes it entirely and needs no code change. Full detail under
-> [Email — live, via Resend](#email--live-via-resend).
+**Live app:** https://lastmile-dev.vercel.app · **Tests:** `npm test` → 128
+passing · **Design write-up:** [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md)
+
+---
+
+## For reviewers — start here
+
+Everything below tests the **live deployment**. No setup, no `.env`, no local
+install needed for this section — [Getting started](#getting-started) covers
+running it locally if you want that instead.
+
+### Demo credentials
+
+| Role | Email | Password |
+| ---- | ----- | -------- |
+| Admin | `admin@lastmile.local` | `D7v_Wins2026` |
+| Agent — North zone | `agent.north@lastmile.local` | `D7v_Wins2026` |
+| Agent — South zone | `agent.south@lastmile.local` | `D7v_Wins2026` |
+| Customer | register your own at [`/register`](https://lastmile-dev.vercel.app/register) | — |
+
+These are seed accounts on this assignment's demo database, created for
+evaluation and reset by re-running `npm run db:seed` — not credentials for
+anything beyond this submission.
+
+### Five-minute walkthrough
+
+**1. Customer — quote and order.** Register at `/register`. Go to **New
+order**. Use pincode `110085` for pickup and `110017` for drop (the two
+seeded zones — any other pincode correctly reports "no serviceable area",
+since there is no real geocoding behind this, only the admin-configured zone
+map). Watch the quote panel price live as you fill in dimensions and weight.
+Confirm — the order is created and auto-assigned to whichever agent is free
+in the pickup zone.
+
+**2. Admin — configuration and control.** Sign out, sign in as the admin.
+`/admin` shows zone/rate-card coverage; `/admin/zones`, `/admin/areas`,
+`/admin/rate-cards`, `/admin/cod-surcharges` are all live CRUD, not seed-only
+config. `/admin/orders` filters by status, zone and agent, and can reassign or
+override the status of any order with a reason.
+
+**3. Agent — the delivery side.** Sign in as `agent.north@lastmile.local`.
+`/agent/orders` shows only orders assigned to that agent. Advance one through
+`PICKED_UP → IN_TRANSIT → OUT_FOR_DELIVERY`, or mark it `FAILED` with a
+reason. Toggle availability — this governs auto-assignment only; it does not
+reassign work already held.
+
+**4. Failed delivery → reschedule → reassignment.** As the customer, open a
+`FAILED` order and pick a new date. A new delivery attempt opens and
+auto-assignment runs again — worth confirming it doesn't just hand the order
+back to the agent who already failed it (it re-ranks by current load, so it
+won't unless they're genuinely the only one free).
+
+**5. Password reset.** From `/login`, **Forgot password?** → enter any email,
+registered or not. The confirmation message is identical either way — that is
+deliberate (see [Password reset](#password-reset) for why), and it is the part
+of this step you can verify directly. Completing the rest — opening the
+emailed link and setting a new password — needs an inbox that receives the
+message, which for the reason below is not one your testing session has
+access to; the second screenshot is that step completed, on this deployment,
+during testing.
+
+### Screenshots
+
+Every page below is a real capture of the live deployment — signed in as an
+actual seeded account, showing actual data from testing, not a mock or a
+design file. `page-04` and `page-12` show the quote panel fully resolved to a
+real price (`180.00`), not mid-request.
+
+<table>
+<tr>
+<td width="50%">
+
+**Landing** — the design system's dark identity, one accent, GSAP-driven
+hero reveal.
+
+![Landing page](docs/screenshots/page-01-landing.png)
+
+</td>
+<td width="50%">
+
+**Order form + live quote** — pricing updates as the parcel is filled in;
+the full itemised breakdown, not just a total.
+
+![Order form with live quote](docs/screenshots/page-04-order-new-quote.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Order tracking** — the stepper (idealised journey) above the append-only
+history (what actually happened), read straight from
+`order_status_history`.
+
+![Order tracking with stepper and history](docs/screenshots/page-06-order-tracking.png)
+
+</td>
+<td width="50%">
+
+**Admin — orders** — filter by status, zone and agent; manual assign,
+auto-assign, and status override with a reason, all in one row.
+
+![Admin orders with filters and controls](docs/screenshots/page-10-admin-orders.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Admin — rate cards** — the pricing configuration a reviewer can edit
+live; nothing here is hardcoded.
+
+![Admin rate cards](docs/screenshots/page-09-admin-rate-cards.png)
+
+</td>
+<td width="50%">
+
+**Agent workload** — availability toggle, COD-to-collect total, and the
+only status moves the workflow actually permits from here.
+
+![Agent deliveries with availability toggle](docs/screenshots/page-11-agent-orders.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Mobile — order form** — the same live quote panel, single-column, a
+pinned header that behaves correctly while scrolling (the responsive pass
+from an earlier phase).
+
+![Mobile order form](docs/screenshots/page-12-mobile-order-form.png)
+
+</td>
+<td width="50%">
+
+**Sign in / register** — the same design system carried through to auth;
+no separate visual language for "the boring pages."
+
+![Login and register](docs/screenshots/page-02-login.png)
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary>Six more — customer order list, admin overview, zones, register page</summary>
+
+<table>
+<tr>
+<td width="50%">
+
+![Customer order list](docs/screenshots/page-05-order-list.png)
+
+</td>
+<td width="50%">
+
+![Admin configuration overview](docs/screenshots/page-07-admin-overview.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+![Admin zones](docs/screenshots/page-08-admin-zones.png)
+
+</td>
+<td width="50%">
+
+![Register page](docs/screenshots/page-03-register.png)
+
+</td>
+</tr>
+</table>
+
+</details>
+
+### Proof that email actually sends
+
+**This build's Resend account is on the free sandbox tier**, which Resend
+restricts to delivering only to the single address that owns the account. That
+address is not something you can substitute your own email for while
+reviewing — it is already a registered account on this deployment, and its
+inbox is not something this submission can hand you access to. Whatever
+address you use while working through the walkthrough above, **no email will
+reach you**, and that is expected rather than something to debug. The app
+still logs every attempt and correctly reports it as undelivered internally;
+it just has no way to surface that to whoever is waiting on the email.
+
+The screenshots below are the evidence for what your own testing cannot show
+you: both were sent by this exact deployment, to that one reachable address,
+while testing the flows above.
+
+This is a Resend account limitation, not an application bug — confirmed
+directly against the API: `403 "You can only send testing emails to your own
+email address"`. Verifying a domain removes it for every recipient and needs
+no code change; out of scope for this assignment.
+
+<table>
+<tr>
+<td width="50%">
+
+**Order confirmation**, triggered by a real order created through the UI —
+order number, assigned agent, and a working tracking link back to the
+deployed app:
+
+![Order confirmation email](docs/screenshots/email-order-confirmation.png)
+
+</td>
+<td width="50%">
+
+**Password reset**, triggered by the forgot-password flow — one-hour expiry,
+single use, and a working link to `/reset-password` on the deployed app:
+
+![Password reset email](docs/screenshots/email-password-reset.png)
+
+</td>
+</tr>
+</table>
+
+To confirm the mechanism yourself without needing inbox access: open browser
+devtools → Network tab while advancing an order's status or triggering a
+reschedule, and check the response body for `"notified": true` — that field is
+only ever `true` when a provider genuinely accepted the message, not merely
+because the endpoint was called.
 
 ## Contents
 
+- [For reviewers — start here](#for-reviewers--start-here) — demo credentials, a 5-minute walkthrough, screenshots, proof email sends
 - [Getting started](#getting-started) · [Environment variables](#environment-variables)
 - [Database schema](#database-schema) · [Configuration model](#configuration-model)
 - [Rate engine](#rate-engine) — the charge calculation

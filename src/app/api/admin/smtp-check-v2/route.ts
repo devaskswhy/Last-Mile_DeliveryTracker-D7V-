@@ -1,6 +1,8 @@
 import { ok } from "@/lib/api";
 import { adminRoute } from "@/lib/admin/handler";
 
+export const dynamic = "force-dynamic";
+
 /**
  * TEMPORARY — diagnoses why SMTP delivery is not reaching a real inbox on the
  * deployed environment, when the failure is invisible from outside because

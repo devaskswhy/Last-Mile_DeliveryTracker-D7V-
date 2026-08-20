@@ -1,4 +1,4 @@
-import { ResendEmailChannel } from "./channels/email-resend";
+import { SmtpEmailChannel } from "./channels/email-smtp";
 import { SmsStubChannel } from "./channels/sms-stub";
 import { renderMessage } from "./templates";
 import type {
@@ -21,7 +21,7 @@ export { renderMessage, describeStatus, trackingUrl } from "./templates";
  */
 
 let registry: NotificationChannel[] = [
-  new ResendEmailChannel(),
+  new SmtpEmailChannel(),
   new SmsStubChannel(),
 ];
 

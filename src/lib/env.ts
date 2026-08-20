@@ -17,11 +17,13 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.coerce.number().int().positive().default(604800),
   AUTH_COOKIE_NAME: z.string().min(1).default("lm_session"),
 
-  // Optional: without a key the email channel reports itself unconfigured and
-  // the message is logged instead of sent. A missing key must not stop the app
-  // booting — order operations do not depend on notifications succeeding.
-  RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM_ADDRESS: z.string().optional(),
+  // Optional: without these the email channel reports itself unconfigured and
+  // the message is logged instead of sent. Missing values must not stop the
+  // app booting -- order operations do not depend on notifications succeeding.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
   EMAIL_FROM_NAME: z.string().optional(),
 
   NODE_ENV: z
