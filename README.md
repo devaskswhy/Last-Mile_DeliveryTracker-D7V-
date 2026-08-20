@@ -6,6 +6,18 @@ assigning agents, and notifying customers at every status change.
 Next.js 14 (App Router) · TypeScript · Tailwind CSS · Prisma 6 · PostgreSQL ·
 Zod · bcryptjs · jose.
 
+> **Before you test email or password reset:** this build's Resend account is
+> on the free sandbox tier, which Resend restricts to delivering only to the
+> address that owns the account. Order confirmations, status-change emails and
+> password-reset links all go through the same sender, so **all of them only
+> arrive at that one address** — any other recipient gets a real API call that
+> the app correctly logs and reports as undelivered, while the UI still shows
+> its normal "sent" confirmation (deliberately, to avoid leaking which emails
+> are registered accounts — see [Password reset](#password-reset)). This is a
+> Resend account limitation, not an application bug; verifying a domain
+> removes it entirely and needs no code change. Full detail under
+> [Email — live, via Resend](#email--live-via-resend).
+
 ## Contents
 
 - [Getting started](#getting-started) · [Environment variables](#environment-variables)
@@ -832,9 +844,15 @@ send that did not happen.
 
 > **Free-tier limit worth knowing:** until you verify a domain with Resend, the
 > sandbox sender (`onboarding@resend.dev`) only delivers to the email address
-> that owns the Resend account. Mail to any other customer address is accepted
-> by the API and then dropped. Verify a domain before treating email as
-> genuinely live for real customers.
+> that owns the Resend account. Mail to any other customer address — order
+> emails **and** the [password-reset link](#password-reset) alike, since both
+> go through this same channel — is accepted by the API and then dropped.
+> Confirmed directly against Resend: `403 "You can only send testing emails to
+> your own email address"`. The app already handles this correctly: it logs
+> the rejection and reports the send as failed internally, it just has no way
+> to surface that to whoever is waiting on the email. Verify a domain to lift
+> the restriction for every recipient — a one-line env var change afterward,
+> no code to touch.
 
 Interpolated text is HTML-escaped. A failure reason is typed by an agent and a
 delivery note by a customer; both land in an email body, so unescaped
