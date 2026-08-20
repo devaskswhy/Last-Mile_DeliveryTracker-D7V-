@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Internal pages (admin, agent, orders) follow the OS theme, unchanged. */
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -17,11 +18,73 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/*
+ * The public surface opts into the dark identity explicitly rather than the
+ * theme being forced globally. Internal pages already ship light and dark
+ * variants keyed to `prefers-color-scheme`; flipping the base underneath them
+ * would put dark text on a dark background for anyone on a light OS.
+ */
+.surface-public {
+  --background: #08090a;
+  --foreground: #f2f5f3;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@layer base {
+  ::selection {
+    background: #d6ff3d;
+    color: #08090a;
+  }
+
+  /* One visible focus treatment, in the one accent. */
+  .surface-public :focus-visible {
+    outline: 2px solid #d6ff3d;
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Hairline in the neutral ramp, used to divide sections. */
+  .rule {
+    border-top: 1px solid #242a2e;
+  }
+
+  /*
+   * Elements that a reveal will move. Declared up front so the compositor has
+   * them on their own layer before the first frame, rather than promoting them
+   * mid-animation, which is what causes the one-frame flicker at the start of a
+   * scroll reveal.
+   */
+  [data-reveal] {
+    will-change: transform, opacity;
+  }
+}
+
+/* Lenis needs this to own the scroll position. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

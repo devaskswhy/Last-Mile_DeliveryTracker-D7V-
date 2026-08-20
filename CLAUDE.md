@@ -33,17 +33,23 @@ Two further rules that the database itself enforces:
    describe the shape of the domain (`B2B` / `B2C`, `INTRA` / `INTER`), which is
    structural, and each is guarded by a `satisfies` check against the Prisma
    enum so it cannot drift.
-4. **SMS is a stub and must never be described as working.** It logs the
+4. **One accent, one easing curve.** The accent is the `signal` token; never
+   introduce a second hue, and never write the hex inline. The curve is
+   `EASE` in `src/lib/motion/tokens.ts`, consumed by both Tailwind
+   (`ease-signature`) and GSAP (`gsap.defaults`). Scrubbed and looping
+   animations are the only `linear` exceptions, because easing them makes them
+   pulse. Animate transform and opacity only.
+5. **SMS is a stub and must never be described as working.** It logs the
    message it would send and returns `delivered: false`. Do not change it to
    report success, and do not let any UI say "SMS sent" — the point is that a
    silent non-delivery is worse than a visible one. Email via Resend is real,
    but the sandbox sender only reaches the Resend account owner until a domain
    is verified.
-5. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
+6. **`FAILED` is not a closed status.** Only `DELIVERED` and `CANCELLED` are.
    A failed delivery is rescheduled into a new attempt, so treating it as
    terminal would block the reassignment that reschedule depends on. Use
    `isClosedStatus()`, never a hand-rolled list.
-6. **A price is never accepted from a client.** `POST /api/orders` recomputes
+7. **A price is never accepted from a client.** `POST /api/orders` recomputes
    the charge with the same `calculateRate()` the quote endpoint uses. The
    client sends `acknowledgedTotal` only so the server can *check* it; a
    mismatch is refused with `QUOTE_STALE`. Never persist a charge that arrived
@@ -96,6 +102,7 @@ src/
       agent/             Role-scoped routes
     admin/               Admin UI — server components read Prisma directly,
                          client components mutate through the admin API
+    (public)/            Landing + auth — dark identity, GSAP/Lenis motion
     orders/              Customer order UI (create, list, detail + history)
     agent/               Agent workload UI with status actions
   components/            UI primitives + OrderForm, shared by both surfaces
@@ -137,6 +144,9 @@ src/
       assign.ts          Manual/auto (re)assignment for admins
       history.ts         The ONLY writer to order_status_history
       order-number.ts    LM-YYYYMMDD-XXXXXX references
+    motion/
+      tokens.ts          EASE / DURATION / MOBILE_BREAKPOINT — the ONE curve
+      gsap.ts            registerMotion() — plugins + house ease, once
   middleware.ts          Role-based route protection
 ```
 

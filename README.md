@@ -596,6 +596,128 @@ Every outcome is logged per channel with whether it was sent and why not:
 
 ---
 
+## Design system
+
+The public surface — landing, sign in, register — runs a dark, high-contrast
+identity. Internal pages (admin, agent, customer) are untouched and still follow
+the OS theme.
+
+> The theme is applied by a `.surface-public` class on the public shell, not on
+> `<body>`. Internal pages already ship light and dark variants keyed to
+> `prefers-color-scheme`; flipping the base underneath them would have put dark
+> text on a dark background for anyone on a light OS.
+
+### One accent
+
+`signal` — hi-vis lime `#D6FF3D`. The colour of a courier's vest and a road
+sign, so it reads as this domain rather than as generic software, at roughly
+15:1 contrast on the `ink` base.
+
+**There is no second accent.** States that would normally reach for one (danger,
+success) use weight, opacity and the neutral `ink` ramp instead. Components
+reference the `signal` token, never a raw hex, so the identity is a one-line
+change.
+
+### One easing curve
+
+`EASE = [0.16, 1, 0.3, 1]` in `src/lib/motion/tokens.ts` — an expo-out shape
+that leaves fast and settles without a bounce.
+
+Those four numbers are consumed twice: Tailwind turns them into
+`ease-signature`, and `registerMotion()` evaluates the same Bézier into a GSAP
+ease named `lm`, set as `gsap.defaults`. A CSS transition and a GSAP tween on
+the same page therefore travel identically.
+
+Two animations are deliberately **linear**: the scroll-scrubbed hero parallax
+and the looping marquee. A scrubbed tween is already driven by scroll position,
+and a loop has no start or end — easing either one makes it visibly pulse. That
+is a correctness requirement, not a second curve.
+
+### Scale
+
+| Token | Purpose |
+| ----- | ------- |
+| `text-display-lg` / `display` / `headline` / `title` | Display scale, `clamp()`-fluid with tight tracking |
+| `text-body-lg` / `body` / `caption` / `eyebrow` | Reading sizes |
+| `px-gutter`, `py-section` | Page rhythm — few large steps, not many small ones |
+| `max-w-shell`, `max-w-prose` | Layout and measure |
+| `duration-fast|base|slow` | 350 / 800 / 1400ms |
+
+---
+
+## Motion
+
+GSAP + ScrollTrigger + Lenis, wired once at the public shell.
+
+### Smooth scroll
+
+`SmoothScroll.tsx` runs **one** Lenis instance driven from `gsap.ticker`:
+
+```ts
+lenis.on("scroll", ScrollTrigger.update);
+gsap.ticker.add((time) => lenis.raf(time * 1000));
+gsap.ticker.lagSmoothing(0);
+```
+
+Three details matter. Two Lenis instances fight over `scrollTop` and stutter.
+Two independent `requestAnimationFrame` loops let GSAP read a scroll position
+Lenis is midway through changing, so pins drift by a frame. And `lagSmoothing(0)`
+is required because GSAP normally absorbs a long frame by pretending less time
+passed — right for a self-running tween, wrong for one scrubbed by scroll, where
+the scroll position is the source of truth.
+
+Touch scrolling stays native: Lenis over a touch gesture fights the platform's
+own momentum and reads as lag on the devices least able to afford the work.
+
+### Preloader
+
+A 0–100 counter with a **2s floor**, then a wipe. The floor is the point — on a
+warm cache everything is ready in ~50ms, and a loader that flashes for three
+frames reads as a glitch rather than as loading. It stays honest about real
+waits too: if assets take longer than the floor it holds at 99 rather than
+sitting at 100.
+
+The wipe is a `scaleY` on a transform origin, not a height animation. Animating
+the height of a full-screen element relayouts the document every frame.
+
+It renders on the landing only. A two-second curtain is right once on a page
+someone chose to visit; in front of a sign-in form it is a tax on every attempt.
+
+### Performance discipline
+
+- **Transform and opacity only.** Nothing animates `top`, `left`, `width` or
+  `height`. Those invalidate layout, so the browser re-runs layout and paint per
+  frame; transform and opacity are composited and skip both. Even the preloader's
+  progress bar is a `scaleX`, not a width.
+- **Consolidated triggers.** All reveals go through a single
+  `ScrollTrigger.batch`, not one trigger per element — twenty elements would
+  otherwise mean twenty triggers, each re-measured on every refresh.
+- **One pin, desktop only.** Pinning changes document height and forces a full
+  recalculation.
+- **Mobile drops the heavy work.** Below `MOBILE_BREAKPOINT` (768px) there is no
+  pin, no parallax and no scrubbed timeline — reveals become a single fade.
+  Handled by `gsap.matchMedia` so crossing the breakpoint tears the timeline
+  down properly instead of leaving a stale pin behind.
+- **`will-change` is released.** Reveals `clearProps: "willChange"` on
+  completion, so a long page does not hold a composited layer per element for
+  its whole lifetime.
+- **`ignoreMobileResize`.** A collapsing mobile URL bar is a scroll, not a layout
+  change; recalculating on it would fire mid-gesture.
+
+### Reduced motion is a real branch
+
+`prefers-reduced-motion: reduce` is its own `matchMedia` condition, not a
+side-effect of the mobile one. It gets no smooth scroll, no reveals and no
+hiding — content is simply where it belongs.
+
+Initial hidden states are set in **JavaScript**, never CSS. If the script never
+runs — JS disabled, a chunk that fails — the markup is already readable, rather
+than a page of invisible text held down by an `opacity-0` class that nothing
+will remove. Verified: the delivered HTML contains zero `opacity-0` occurrences
+and all copy is server-rendered.
+
+---
+
 ## Notes
 
 `order_status_history` is append-only and enforced by a Postgres trigger —
