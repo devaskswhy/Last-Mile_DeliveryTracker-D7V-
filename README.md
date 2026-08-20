@@ -299,7 +299,6 @@ committed.
 | `SMTP_USER` | no | A Gmail address. Without it (and `SMTP_PASS`) the channel reports itself unconfigured and logs instead of sending. |
 | `SMTP_PASS` | no | A 16-character [Gmail app password](https://myaccount.google.com/apppasswords) — not the account password. |
 | `EMAIL_FROM_NAME` | no | Display name on outgoing mail. Defaults to `Last-Mile Delivery`. |
-| `EMAIL_FROM_NAME` | no | Sender display name. |
 | `NEXT_PUBLIC_APP_URL` | no | Base URL for tracking links in emails. **Set this in production** or emailed links point at localhost. |
 
 Generate a secret with:
