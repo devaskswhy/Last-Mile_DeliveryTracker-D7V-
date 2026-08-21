@@ -25,6 +25,7 @@ const PROTECTED_PREFIXES: ReadonlyArray<{
   { prefix: "/orders", allow: ["CUSTOMER", "AGENT", "ADMIN"] },
   { prefix: "/api/orders", allow: ["CUSTOMER", "AGENT", "ADMIN"] },
   { prefix: "/api/me", allow: ["CUSTOMER", "AGENT", "ADMIN"] },
+  { prefix: "/api/areas", allow: ["CUSTOMER", "AGENT", "ADMIN"] },
 ];
 
 function matchRule(pathname: string) {

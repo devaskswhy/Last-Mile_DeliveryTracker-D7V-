@@ -46,6 +46,13 @@ export interface CustomerOption {
   email: string;
 }
 
+interface ServiceableArea {
+  pincode: string;
+  areaName: string;
+  zoneCode: string;
+  zoneName: string;
+}
+
 const emptyAddress = {
   contactName: "",
   phone: "",
@@ -75,6 +82,20 @@ export function OrderForm({
   const [customerQuery, setCustomerQuery] = useState("");
   const [pickup, setPickup] = useState<Address>({ ...emptyAddress });
   const [drop, setDrop] = useState<Address>({ ...emptyAddress });
+
+  // null while loading or if the fetch fails -- AddressFields falls back to a
+  // freeform pincode input either way, so a slow or failed request degrades
+  // to exactly how this form behaved before the picker existed, not a dead end.
+  const [areas, setAreas] = useState<ServiceableArea[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiRequest<{ areas: ServiceableArea[] }>("/api/areas").then((result) => {
+      if (!cancelled && result.ok && result.data) setAreas(result.data.areas);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [lengthCm, setLengthCm] = useState("");
   const [breadthCm, setBreadthCm] = useState("");
   const [heightCm, setHeightCm] = useState("");
@@ -361,8 +382,8 @@ export function OrderForm({
         ) : null}
 
         <div className="grid gap-6 md:grid-cols-2">
-          <AddressFields title="Pickup" value={pickup} onChange={setPickup} />
-          <AddressFields title="Drop" value={drop} onChange={setDrop} />
+          <AddressFields title="Pickup" value={pickup} onChange={setPickup} areas={areas} />
+          <AddressFields title="Drop" value={drop} onChange={setDrop} areas={areas} />
         </div>
 
         <Panel>
@@ -441,12 +462,7 @@ export function OrderForm({
   );
 }
 
-/**
- * A one-time tip, not a fact about any specific deployment's zones -- naming
- * an actual pincode here would be the kind of thing CLAUDE.md's "pricing
- * configuration is data, never code" rule exists to prevent, since the admin
- * can reconfigure zones at any time and this copy ships in the bundle.
- */
+/** A one-time tip pointing out that pricing updates live as the form fills in. */
 function OrderFormTip({ onDismiss }: { onDismiss: () => void }) {
   const [closing, setClosing] = useState(false);
 
@@ -462,9 +478,8 @@ function OrderFormTip({ onDismiss }: { onDismiss: () => void }) {
     >
       <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
       <p className="flex-1">
-        Pricing is live as you type — fill in both addresses, the parcel size
-        and weight. Only pincodes an admin has mapped into a zone will price;
-        anything else says so clearly instead of failing silently.
+        Pricing updates live as you fill in the form — pick a pickup and drop
+        pincode from the list, then add the parcel size and weight.
       </p>
       <button
         type="button"
@@ -492,13 +507,17 @@ function AddressFields({
   title,
   value,
   onChange,
+  areas,
 }: {
   title: string;
   value: Address;
   onChange: (next: Address) => void;
+  areas: ServiceableArea[] | null;
 }) {
-  const set = (key: keyof Address) => (event: React.ChangeEvent<HTMLInputElement>) =>
-    onChange({ ...value, [key]: event.target.value });
+  const set =
+    (key: keyof Address) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      onChange({ ...value, [key]: event.target.value });
 
   return (
     <Panel>
@@ -521,7 +540,18 @@ function AddressFields({
             <input className={inputClass} value={value.city} onChange={set("city")} />
           </Field>
           <Field label="Pincode" hint="Sets the zone">
-            <input className={inputClass} value={value.pincode} onChange={set("pincode")} />
+            {areas && areas.length > 0 ? (
+              <select className={inputClass} value={value.pincode} onChange={set("pincode")}>
+                <option value="">Select…</option>
+                {areas.map((a) => (
+                  <option key={a.pincode} value={a.pincode}>
+                    {a.pincode} — {a.areaName} ({a.zoneName})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input className={inputClass} value={value.pincode} onChange={set("pincode")} />
+            )}
           </Field>
         </div>
       </div>

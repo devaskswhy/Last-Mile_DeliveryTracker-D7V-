@@ -40,13 +40,14 @@ as a customer in step 1 below and that is where you will see it work.
 ### Five-minute walkthrough
 
 **1. Customer — quote and order.** Register at `/register`. Go to **New
-order**. Use pincode `110085` for pickup and `110017` for drop (the two
-seeded zones — any other pincode correctly reports "no serviceable area",
-since there is no real geocoding behind this, only the admin-configured zone
-map). Watch the quote panel price live as you fill in dimensions and weight.
-Confirm — the order is created and auto-assigned to whichever agent is free
-in the pickup zone, and an order-confirmation email lands in the inbox you
-registered with, usually within a few seconds.
+order**. Pickup and drop pincode are dropdowns, populated live from
+`GET /api/areas` rather than free text — there is no real geocoding behind
+this, only the admin-configured zone map, so the picker only ever offers
+addresses that will actually price. Pick different zones for pickup and drop
+to see an `INTER` quote. Watch the quote panel price live as you fill in
+dimensions and weight. Confirm — the order is created and auto-assigned to
+whichever agent is free in the pickup zone, and an order-confirmation email
+lands in the inbox you registered with, usually within a few seconds.
 
 **2. Admin — configuration and control.** Sign out, sign in as the admin.
 `/admin` shows zone/rate-card coverage; `/admin/zones`, `/admin/areas`,
@@ -543,6 +544,26 @@ Errors carry their `code` in `error.details`. An unresolvable address answers
 **422** (the customer can fix it); a configuration gap answers **409** (only an
 admin can), so the frontend can say "we cannot price this route yet" instead of
 blaming the address.
+
+### Serviceable areas
+
+`GET /api/areas` — any signed-in role. Backs the pincode pickers on the order
+form: rather than a freeform field a customer can mistype, or a hardcoded list
+that would drift the moment an admin adds or retires an area, the picker reads
+this endpoint on mount and offers only pincodes that will actually resolve to
+a price. Returns every active area whose zone is also active, grouped by zone:
+
+```jsonc
+// GET /api/areas
+{ "ok": true, "data": { "areas": [
+  { "pincode": "110085", "areaName": "Rohini", "zoneCode": "NORTH", "zoneName": "North Zone" },
+  { "pincode": "110017", "areaName": "Saket", "zoneCode": "SOUTH", "zoneName": "South Zone" }
+] } }
+```
+
+If the request fails, the order form falls back to a plain text pincode field
+— degrading to exactly how it behaved before this endpoint existed, not a
+dead end.
 
 ### Tests
 

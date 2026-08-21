@@ -97,6 +97,7 @@ src/
     api/                 Route handlers (REST)
       auth/              register | login | logout
       me/                Current-user probe
+      areas/             Serviceable pincodes, for the order form's pickers
       admin/             Admin config CRUD (zones, areas, rate cards, COD)
       agent/             Role-scoped routes
     admin/               Admin UI — server components read Prisma directly,
