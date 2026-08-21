@@ -60,6 +60,8 @@ type Address = typeof emptyAddress;
 /** Waits for typing to stop before spending a request on a half-typed pincode. */
 const QUOTE_DEBOUNCE_MS = 450;
 
+const ORDER_TIP_DISMISSED_KEY = "lm_order_tip_dismissed";
+
 export function OrderForm({
   customers,
   createdBy,
@@ -89,6 +91,20 @@ export function OrderForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
+
+  // Starts hidden and only appears once localStorage confirms it was never
+  // dismissed on this browser -- reading localStorage during render would
+  // disagree with the server-rendered markup and fail hydration.
+  const [showTip, setShowTip] = useState(false);
+  useEffect(() => {
+    if (window.localStorage.getItem(ORDER_TIP_DISMISSED_KEY) !== "1") {
+      setShowTip(true);
+    }
+  }, []);
+  const dismissTip = useCallback(() => {
+    window.localStorage.setItem(ORDER_TIP_DISMISSED_KEY, "1");
+    setShowTip(false);
+  }, []);
 
   /**
    * The identity of the priced shipment. Everything that changes the price is
@@ -308,6 +324,8 @@ export function OrderForm({
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
       <div className="flex flex-col gap-6">
+        {showTip ? <OrderFormTip onDismiss={dismissTip} /> : null}
+
         {error ? <Notice kind="error">{error}</Notice> : null}
         {created ? <Notice kind="success">{created}</Notice> : null}
 
@@ -419,6 +437,43 @@ export function OrderForm({
             "The server re-prices this on confirm and rejects it if the total has changed."}
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A one-time tip, not a fact about any specific deployment's zones -- naming
+ * an actual pincode here would be the kind of thing CLAUDE.md's "pricing
+ * configuration is data, never code" rule exists to prevent, since the admin
+ * can reconfigure zones at any time and this copy ships in the bundle.
+ */
+function OrderFormTip({ onDismiss }: { onDismiss: () => void }) {
+  const [closing, setClosing] = useState(false);
+
+  function close() {
+    setClosing(true);
+    window.setTimeout(onDismiss, 350);
+  }
+
+  return (
+    <div
+      role="status"
+      className={`flex items-start gap-3 rounded-2xl border border-signal/40 bg-signal-wash px-4 py-3 text-caption text-ink-bright transition-opacity duration-fast ease-signature ${closing ? "opacity-0" : "opacity-100"}`}
+    >
+      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
+      <p className="flex-1">
+        Pricing is live as you type — fill in both addresses, the parcel size
+        and weight. Only pincodes an admin has mapped into a zone will price;
+        anything else says so clearly instead of failing silently.
+      </p>
+      <button
+        type="button"
+        onClick={close}
+        aria-label="Dismiss tip"
+        className="shrink-0 text-ink-muted transition-colors duration-fast ease-signature hover:text-ink-bright"
+      >
+        ✕
+      </button>
     </div>
   );
 }
