@@ -81,7 +81,8 @@ earlier testing, in case you'd rather not wait on your own mail to arrive.
 Every page below is a real capture of the live deployment — signed in as an
 actual seeded account, showing actual data from testing, not a mock or a
 design file. `page-04` and `page-12` show the quote panel fully resolved to a
-real price (`180.00`), not mid-request.
+real price (`115.00`), not mid-request, and both pincode fields as the
+picker described above rather than free text.
 
 <table>
 <tr>
